@@ -9,6 +9,7 @@
 #include "kolibri1.hpp"
 #include "lfm2moe.hpp"
 #include "flint.hpp"
+#include "mistral4.hpp"
 #include "mmq.hpp"
 #include "qwen35.hpp"
 #include "runtime.hpp"
@@ -1632,6 +1633,9 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
         if (name == "lfm2moe") return std::make_unique<Lfm2Moe>();
         if (name == "flint") return std::make_unique<Flint>();
         if (name == "kolibri1") return std::make_unique<Kolibri1>();
+#if !defined(STRATA_GPU_METAL)   // the Metal build does not compile mistral4.cpp
+        if (name == "mistral4") return std::make_unique<Mistral4>();
+#endif
         throw std::runtime_error(o.model + " is a '" + name + "' model, which this engine does not run");
     };
     int cards = 1, devices = 1;
@@ -3017,12 +3021,15 @@ void Engine::shared_scratch() {
         dx_ = fbuf(rr * n_embd_);
         hf_ = fbuf(rr);
     }
+    if (guard_expert_down_) hfd_ = fbuf((size_t) std::max(kSlots, card_rows()));   // a launch's rows at most
 }
 
 // The sequence's state, the caches and every buffer, once the weights are known.
 void Engine::alloc() {
-    // --dump-layers prints one token's stages
-    rows_ = opt_.dump ? 1 : std::min(opt_.prompt_batch, opt_.max_context);
+    // --dump-layers prints one token's stages; with STRATA_DUMP_DIR, which writes every token's (dbg()), the calls stay
+    // the ones without it, so that a prompt batch's own paths are the ones dumped
+    const char* every = std::getenv("STRATA_DUMP_DIR");
+    rows_ = opt_.dump && !(every && *every) ? 1 : std::min(opt_.prompt_batch, opt_.max_context);
     const size_t most = std::min<size_t>(kReadBytes / ((size_t) streams() * n_embd_ * sizeof(float)), opt_.max_context);
     read_rows_ = rows_ < kStageRows ? rows_ : std::max(rows_, (int) most / rows_ * rows_);
     rec_n_ = recurrent_floats();
@@ -3504,18 +3511,40 @@ bool Engine::input(int32_t token, int64_t row, float* dst) const {
     return false;
 }
 
-void Engine::dbg(const char* name, int il, const float* dev, int n) {
+void Engine::dbg(const char* name, int il, const float* dev, int n, const char* note, bool host) {
     if (!opt_.dump) return;
     std::vector<float> h((size_t) n);
-    ck(cudaStreamSynchronize(cs(st_)), "dump");
-    ck(cudaMemcpy(h.data(), dev, (size_t) n * sizeof(float), cudaMemcpyDeviceToHost), "dump");
+    if (host) {
+        std::memcpy(h.data(), dev, (size_t) n * sizeof(float));
+    } else {
+        ck(cudaStreamSynchronize(cs(st_)), "dump");
+        ck(cudaMemcpy(h.data(), dev, (size_t) n * sizeof(float), cudaMemcpyDeviceToHost), "dump");
+    }
     double sum = 0, abs = 0;
     for (float v : h) {
         sum += v;
         abs += std::fabs(v);
     }
+    const auto at = [&](int i) { return i < n ? h[(size_t) i] : 0.f; };
     std::fprintf(stderr, "dump pos=%lld blk=%d %-8s n=%d sum=%.6f abs=%.6f first=%.6f %.6f %.6f\n", (long long) pos_,
-                 il, name, n, sum, abs, h[0], h[1], h[2]);
+                 il, name, n, sum, abs, at(0), at(1), at(2));
+    // STRATA_DUMP_DIR: the values too, a file a call (little-endian floats), and a line of index.tsv for it with its
+    // number, name, layer, the call's position, the count, the file and the caller's note
+    static const char* dir = std::getenv("STRATA_DUMP_DIR");
+    if (!dir || !*dir) return;
+    static std::atomic<long long> made{0};
+    const long long k = made++;
+    char file[192];
+    std::snprintf(file, sizeof file, "%06lld_%s.blk%d.pos%lld.n%d.f32", k, name, il, (long long) pos_, n);
+    const std::filesystem::path d(dir);
+    FILE* f = std::fopen((d / file).string().c_str(), "wb");
+    const bool ok = f && std::fwrite(h.data(), sizeof(float), h.size(), f) == h.size();
+    if (f) std::fclose(f);
+    if (!ok) throw std::runtime_error("STRATA_DUMP_DIR: cannot write " + (d / file).string());
+    if (FILE* t = std::fopen((d / "index.tsv").string().c_str(), "ab")) {
+        std::fprintf(t, "%lld\t%s\t%d\t%lld\t%d\t%s\t%s\n", k, name, il, (long long) pos_, n, file, note ? note : "");
+        std::fclose(t);
+    }
 }
 
 // y = w x for n tokens.  xq is x already in Q8_1, when the caller has it.  rows_per_x below n_out gives each group
@@ -4033,6 +4062,7 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
         Cached cached[kCpuRows * kMaxUsed];
         int32_t host_e[kCpuRows * kMaxUsed], host_k[kCpuRows * kMaxUsed];   // a host entry's expert and its place
         float host_rel[kCpuRows * kMaxUsed];   // and its weight's share of its token's experts' weight
+        float picks[2 * kCpuRows * kMaxUsed];  // --dump-layers: the tokens' experts, then their weights
         int n_host = 0, n_cached = 0;
         for (int t = 0; t < m; ++t) {
             int ids[kMaxUsed];
@@ -4047,6 +4077,10 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                 for (int k = 1; k < n_used_; ++k) mx = std::max(mx, scores[ids[k]]);
                 for (int k = 0; k < n_used_; ++k) sum += w[k] = std::exp(scores[ids[k]] - mx);
                 for (int k = 0; k < n_used_; ++k) w[k] /= sum;
+            }
+            for (int k = 0; k < n_used_ && opt_.dump; ++k) {
+                picks[(size_t) t * n_used_ + k] = (float) ids[k];
+                picks[(size_t) (kCpuRows + t) * n_used_ + k] = w[k];
             }
             float w_all = 0.f;
             for (int k = 0; k < n_used_; ++k) w_all += w[k];
@@ -4071,6 +4105,11 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                 host[n_host++] = {L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes,
                                   we, t, L.h_s_gate.empty() ? 1.f : L.h_s_gate[e], L.h_s_up.empty() ? 1.f : L.h_s_up[e]};
             }
+        }
+        if (opt_.dump) {   // the experts of the call's tokens [at, at + m) and their weights, n_used_ a token
+            const std::string toks = "tokens " + std::to_string(at) + ".." + std::to_string(at + m - 1);
+            dbg("ffn_moe_topk", il, picks, m * n_used_, toks.c_str(), true);
+            dbg("ffn_moe_weights_norm", il, picks + (size_t) kCpuRows * n_used_, m * n_used_, toks.c_str(), true);
         }
         // Strata's STRATA_ROUTE_TAIL_SKIP: an expert outside VRAM that every token here ranks at tail_skip or later
         // adds little to any of them, so it is not computed.  The others keep the weights the router gave them.
@@ -4112,6 +4151,12 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
             // the scratch holds rows_ experts' values, and a launch's down rows stay inside one add_scaled's kSumRows
             const int most = kernels::native_mmvq_slots_wide() ? kSlots : 8;
             const int per = rows_ >= most ? most : rows_ >= 8 ? 8 : 1;
+            const auto who = [&](int i0, int m) {   // --dump-layers: experts of a launch, as the call's row:expert
+                std::string s;
+                for (int j = 0; j < m; ++j)
+                    s += std::to_string(cached[i0 + j].row) + ":" + std::to_string(cached[i0 + j].e) + " ";
+                return s;
+            };
             ScaledRows sum{};
             for (int i0 = 0; i0 < n_cached; i0 += per) {
                 const int m = std::min(per, n_cached - i0);
@@ -4141,13 +4186,25 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                 }
                 ExpertScales es = expert_scales(L);
                 for (int j = 0; j < m && (es.gate || es.up); ++j) es.e[j] = cached[i0 + j].e;
+                if (opt_.dump) dbg("ffn_moe_gate_up", il, g_, m * 2 * n_ff_exp_, who(i0, m).c_str());
                 if (gelu_) geglu_rows(g_, h_, n_ff_exp_, m, st_, &es);
                 else swiglu_clamp_rows(g_, h_, n_ff_exp_, m, limit, st_, &es);
+                if (opt_.dump) dbg("ffn_moe_swiglu", il, h_, m * n_ff_exp_, who(i0, m).c_str());
+                // guard_expert_down_: a row whose blocks would sum past a half's range goes in divided by a power of
+                // two, and its product comes back multiplied by it, exact (as a prompt batch's, moe_rows())
+                if (guard_expert_down_) {
+                    guard_half_sums(h_, (int64_t) ff, n_ff_exp_, m, hfd_, st_);
+                    if (opt_.dump) dbg("ffn_moe_guard", il, hfd_, m, who(i0, m).c_str());
+                }
                 kernels::native_quantize_q8_1(h_, q8_, n_ff_exp_, m, st_);
                 if (!(m > 1 && kernels::native_mmvq_slots((int) L.d_type, down, m, n_ff_exp_, n_embd_, st_)))
                     for (int j = 0; j < m; ++j)
                         kernels::native_mmvq((int) L.d_type, down.w[j], down.x[j], down.y[j], n_ff_exp_, n_embd_, 1,
                                              st_);
+                for (int j = 0; j < m && guard_expert_down_; ++j)
+                    scale_rows(down.y[j], n_embd_, n_embd_, 1, nullptr, hfd_ + j, false, st_);
+                for (int j = 0; j < m && opt_.dump; ++j)
+                    dbg("ffn_moe_down", il, down.y[j], n_embd_, who(i0 + j, 1).c_str());
                 for (int j = 0; j < m; ++j) {
                     const Cached& c = cached[i0 + j];
                     const int k = (i0 + j) % kSumRows;
@@ -4265,10 +4322,12 @@ bool Engine::moe_card(Layer& L, int il, int n) {
     if (gelu_) geglu_rows(g_, h_, n_ff_exp_, rr, st_, &es);
     else swiglu_clamp_rows(g_, h_, n_ff_exp_, rr, clamp_exp_[(size_t) il], st_, &es);
     if (!L.h_s_down.empty()) expert_weights(d_wts_, fp(L.s_down), d_ids_, rr, st_);
+    if (guard_expert_down_) guard_half_sums(h_, n_ff_exp_, n_ff_exp_, rr, hfd_, st_);   // as moe()'s
     kernels::native_quantize_q8_1(h_, q8_, n_ff_exp_ * rr, 1, st_);   // the rows back to back, as one vector
     const kernels::MmvqIds down{table, d_ids_, L.gu2(), q8_, kernels::native_q8_1_bytes(n_ff_exp_), 1, d_,
                                 (size_t) n_embd_};
     kernels::native_mmvq_ids((int) L.d_type, down, rr, n_ff_exp_, n_embd_, st_);
+    if (guard_expert_down_) scale_rows(d_, n_embd_, n_embd_, rr, nullptr, hfd_, false, st_);
     moe_sum(d_, d_wts_, fo_, n_embd_, n_used_, n, st_);
     return true;
 }
@@ -4418,6 +4477,12 @@ void Engine::moe_rows(Layer& L, int il, int n) {
         if (pool_) prompt_use_[(size_t) il * n_expert_ + (size_t) ids_[(size_t) i]] += 1.f;
     }
     if (pool_ && il == first_moe_layer()) prompt_rows_ += n;
+    if (opt_.dump) {   // the tokens' experts and their weights, n_used_ a token
+        std::vector<float> picks((size_t) rr);
+        for (int i = 0; i < rr; ++i) picks[(size_t) i] = (float) ids_[(size_t) i];
+        dbg("ffn_moe_topk", il, picks.data(), rr, "the call's tokens", true);
+        dbg("ffn_moe_weights_norm", il, w, rr, "the call's tokens", true);
+    }
     // The CPU computes some of the routed experts outside VRAM while the others are copied: the ones the fewest
     // tokens chose, whose copy costs as much as any other's and which cost the CPU about as much as their tokens.
     int n_spare = 0, n_cpu = 0;
@@ -4619,7 +4684,18 @@ void Engine::moe_rows(Layer& L, int il, int n) {
         if (rc > 0) {
             if (gelu_) geglu_rows(gu_, hx_, n_ff_exp_, rc, st_, &es);
             else swiglu_clamp_rows(gu_, hx_, n_ff_exp_, rc, limit, st_, &es);
+            if (opt_.dump) {   // the cached experts' rows, by expert: a row's token and its place among the token's
+                std::vector<float> tp((size_t) 2 * rc);
+                for (int r = 0; r < rc; ++r) {
+                    tp[(size_t) 2 * r] = (float) tok[r];
+                    tp[(size_t) 2 * r + 1] = (float) place[r];
+                }
+                dbg("ffn_moe_rows", il, tp.data(), 2 * rc, "token, place: a row's", true);
+                dbg("ffn_moe_gate_up", il, gu_, rc * (int) ff2, "rows as ffn_moe_rows");
+                dbg("ffn_moe_swiglu", il, hx_, rc * (int) ff, "rows as ffn_moe_rows");
+            }
             if (guard) guard_half_sums(hx_, ff, n_ff_exp_, rc, hf_, st_);
+            if (guard && opt_.dump) dbg("ffn_moe_guard", il, hf_, rc, "rows as ffn_moe_rows");
             Mmq::quantize(hx_, nullptr, mq2_, dt, ff, ff, rc, st_);
         }
         for (const Run& r : runs_)
@@ -4709,6 +4785,7 @@ void Engine::moe_rows(Layer& L, int il, int n) {
             share_[size] = std::clamp(0.5 * share_[size] + 0.5 * g / (c + g), 0.05, 0.95);
         }
     }
+    if (opt_.dump) dbg("ffn_moe_down", il, dx_, rr * n_embd_, "a token's experts in its order (the card's)");
     moe_sum(dx_, d_w, fo_, n_embd_, n_used_, n, st_);
     if (n_cpu > 0) moe_add(n);
     if (ahead && holds >= 0) {

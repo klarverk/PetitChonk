@@ -577,7 +577,7 @@ protected:
     void follow(int written);
     void follow_loop();
     void embed(int32_t token, float* dst) const;
-    void dbg(const char* name, int il, const float* dev, int n);
+    void dbg(const char* name, int il, const float* dev, int n, const char* note = nullptr, bool host = false);
     float* fbuf(size_t n);
     int room(int n) const;
     int room_key(int n) const;
@@ -715,6 +715,10 @@ protected:
     /// a prompt batch's products go through guard_half_sums(): the model's activations can sum past a half's range
     /// in a block.  Off for the models whose sums stay in range: it cost LFM2.5 4% of a 30K prompt's read on a 5090.
     bool half_sum_guard_ = false;
+    /// a few tokens' routed experts (moe(), moe_card()) put their down input through guard_half_sums() too; off for
+    /// every architecture but the ones whose down input leaves a half's range (Mistral Small 4)
+    bool guard_expert_down_ = false;
+    float* hfd_ = nullptr;   ///< those rows' powers of two (guard_expert_down_)
 
     std::vector<Layer> layers_;   ///< the model's, and after them the draft block
     Dev out_norm_, output_;
