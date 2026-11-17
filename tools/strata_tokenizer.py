@@ -130,10 +130,31 @@ QWEN2_PATTERN = (
     r"|\s+"
 )
 
+# The `tekken` / `pixtral` pre-tokenizer (Mistral Small 4, llama.cpp architecture `mistral4`), transcribed from the
+# ORACLE: the Split regex of the official tokenizer.json (mistralai/Mistral-Small-4-119B-2603 at a11f36be), whose
+# pre_tokenizer is that Split ("Isolated") and then ByteLevel without a regex.  llama.cpp quotes the same string as
+# "original regex from tokenizer.json" (llama-vocab.cpp L428 at c7518dbe) and runs a rewrite of it for its own regex
+# engine; Python's `regex` takes the original as it is.  llama.cpp gives `tekken` and `pixtral` ignore_merges (L2629-
+# 2634), as the oracle's BPE model has "ignore_merges": true.
+TEKKEN_PATTERN = (
+    r"[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+"
+    r"|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*"
+    r"|\p{N}"
+    r"| ?[^\s\p{L}\p{N}]+[\r\n/]*"
+    r"|\s*[\r\n]+"
+    r"|\s+(?!\S)"
+    r"|\s+"
+)
+
 PRE_PATTERNS = {"glm4": GLM4_PATTERN, "glm5": GLM4_PATTERN,   # every other name: QWEN35_PATTERN, as before
-                "gemma4": GEMMA4_PATTERN, "lfm2": GLM4_PATTERN, "kolibri1": QWEN2_PATTERN}
+                "gemma4": GEMMA4_PATTERN, "lfm2": GLM4_PATTERN, "kolibri1": QWEN2_PATTERN,
+                "tekken": TEKKEN_PATTERN, "pixtral": TEKKEN_PATTERN}
 PRE_SEQUENCES = {"joyai-llm": DEEPSEEK3_SEQUENCE, "deepseek-v3": DEEPSEEK3_SEQUENCE, "flint": FLINT_SEQUENCE}
-IGNORE_MERGES = ("glm4", "glm5", "lfm2")
+IGNORE_MERGES = ("glm4", "glm5", "lfm2", "tekken", "pixtral")
+# An architecture whose pre-tokenizer must be one of these names: any other name refuses instead of falling back to
+# QWEN35_PATTERN, which would load and give wrong ids.  Only the architectures listed here, so every existing model's
+# tokenizer is unchanged.
+ARCH_PRE = {"mistral4": ("tekken", "pixtral")}
 RAW = ("gemma4",)                      # vocabularies of UTF-8 pieces
 MODELS = {"gpt2": None, "gemma4": "gemma4"}   # tokenizer.ggml.model -> the pre-tokenizer it implies, if any
 
@@ -219,9 +240,13 @@ class Tokenizer:
             raise ValueError("expected a BPE tokenizer (model 'gpt2' or 'gemma4'), got %r" % model)
         special = {k: int(md[k]) for k in md
                    if k.startswith("tokenizer.ggml.") and k.endswith("_token_id")}
+        pre = MODELS[model] or md.get("tokenizer.ggml.pre", "qwen35")
+        arch = md.get("general.architecture")
+        if arch in ARCH_PRE and pre not in ARCH_PRE[arch]:
+            raise ValueError("a %r model's pre-tokenizer must be one of %s, got %r: its text would be split wrongly"
+                             % (arch, ", ".join(ARCH_PRE[arch]), pre))
         return cls(list(md["tokenizer.ggml.tokens"]), list(md["tokenizer.ggml.merges"]),
-                   list(md.get("tokenizer.ggml.token_type") or []) or None,
-                   MODELS[model] or md.get("tokenizer.ggml.pre", "qwen35"), special)
+                   list(md.get("tokenizer.ggml.token_type") or []) or None, pre, special)
 
     @classmethod
     def from_dir(cls, path) -> "Tokenizer":
