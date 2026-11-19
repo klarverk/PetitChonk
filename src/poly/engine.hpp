@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <memory>
@@ -461,6 +462,8 @@ protected:
     virtual void router_scores(const Layer& L, int n);
     /// What is done to `rows` rows of logits on the card before they are copied out.
     virtual void finish_logits(float* logits, int rows) { (void) logits, (void) rows; }
+    /// Whether STRATA_LOGITS_DIR and STRATA_GUARD_LOG were checked for this architecture: elsewhere they refuse.
+    virtual bool checked_dumps() const { return false; }
     /// What a token's embedding is multiplied by on its way in.
     virtual float embed_scale() const { return 1.f; }
     /// What a sequence has beside its recurrent state and its rows, in bytes: it is saved and brought back with
@@ -578,6 +581,13 @@ protected:
     void follow_loop();
     void embed(int32_t token, float* dst) const;
     void dbg(const char* name, int il, const float* dev, int n, const char* note = nullptr, bool host = false);
+    // What a comparison with the reference reads, off unless asked for (open_dumps()): STRATA_LOGITS_DIR, every
+    // row of logits the engine computes; STRATA_LOGITS_ALL_ROWS=1, a prompt's rows too (dump_rows()); and
+    // STRATA_GUARD_LOG, what guard_half_sums() did to the routed experts' down input (guard_note()).
+    void open_dumps();
+    void dump_row(const float* host_row, int64_t pos, int32_t token, int n, bool last);
+    void dump_rows(const int32_t* tokens, int m);
+    void guard_note(int il, const float* dev, int rows, const char* where);
     float* fbuf(size_t n);
     int room(int n) const;
     int room_key(int n) const;
@@ -719,6 +729,12 @@ protected:
     /// every architecture but the ones whose down input leaves a half's range (Mistral Small 4)
     bool guard_expert_down_ = false;
     float* hfd_ = nullptr;   ///< those rows' powers of two (guard_expert_down_)
+    std::FILE* logits_f_ = nullptr;    ///< STRATA_LOGITS_DIR: logits.f32, n_vocab_ floats a row
+    std::FILE* logits_ix_ = nullptr;   ///< and logits.jsonl, a line a row
+    std::FILE* guard_f_ = nullptr;     ///< STRATA_GUARD_LOG: a line a guard_half_sums() of the down input
+    bool logits_all_ = false;          ///< STRATA_LOGITS_ALL_ROWS=1
+    long long logits_rows_ = 0, logits_calls_ = 0;
+    const char* logits_src_ = "eval";  ///< "read" while read() runs
 
     std::vector<Layer> layers_;   ///< the model's, and after them the draft block
     Dev out_norm_, output_;

@@ -657,6 +657,8 @@ Engine::~Engine() {
     if (up_) cudaStreamSynchronize(cs(up_));
     if (rs_) cudaStreamSynchronize(cs(rs_));
     if (st_) cudaStreamSynchronize(cs(st_));
+    for (std::FILE* f : {logits_f_, logits_ix_, guard_f_})
+        if (f) std::fclose(f);
     workers_.reset();
     mmq_.reset();
 #if defined(STRATA_GPU_METAL)
@@ -2765,6 +2767,7 @@ void Engine::load(const Options& o) {
     block_guess_ = bg && std::atoi(bg) == 1 && !draft_ && opt_.draft && opt_.window > 1 && block_mask() >= 0 &&
                    !split_;
     if (block_guess_) std::fprintf(stderr, "strata-poly: STRATA_BLOCK_GUESS: the model guesses its own blocks\n");
+    open_dumps();
     alloc();
     if (!opt_.profile.empty()) read_profile(opt_.profile, (int) layers_.size(), n_expert_, prior_);
     fill_expert_cache();
@@ -3511,6 +3514,95 @@ bool Engine::input(int32_t token, int64_t row, float* dst) const {
     return false;
 }
 
+// STRATA_LOGITS_DIR, STRATA_LOGITS_ALL_ROWS and STRATA_GUARD_LOG: what a comparison with the reference reads (FTI
+// T5).  Off unless asked for, and then only where an architecture says they were checked (checked_dumps()).  The
+// dumps are eval()'s and read()'s, so a run with guesses (window(), --batch's step()) or on several cards refuses
+// them.  Nothing they add changes what the engine computes: they read r_, and write into xn_, logits_ and
+// h_logits_ between the calls that use those.  STRATA_GUARD_LOG reads its factors back as the guard writes them,
+// so the layers are not replayed as CUDA graphs while it is on (run()).
+void Engine::open_dumps() {
+    const auto env = [](const char* k) -> const char* {
+        const char* v = std::getenv(k);
+        return v && *v ? v : nullptr;
+    };
+    const char* dir = env("STRATA_LOGITS_DIR");
+    const char* all = env("STRATA_LOGITS_ALL_ROWS");
+    const char* guard = env("STRATA_GUARD_LOG");
+    if (!dir && all) throw std::runtime_error("STRATA_LOGITS_ALL_ROWS needs STRATA_LOGITS_DIR");
+    if (!dir && !guard) return;
+    const std::string what = dir ? "STRATA_LOGITS_DIR" : "STRATA_GUARD_LOG";
+    if (!checked_dumps()) throw std::runtime_error(what + " is checked for mistral4 models only");
+    if (opt_.window > 1 || opt_.batch > 0 || split_ || draft_)
+        throw std::runtime_error(what + " takes one sequence on one card, without guesses: --window 1, no --batch, "
+                                        "no --layer-split");
+    if (dir) {
+        const std::filesystem::path d(dir);
+        std::filesystem::create_directories(d);
+        logits_f_ = std::fopen((d / "logits.f32").string().c_str(), "wb");
+        logits_ix_ = std::fopen((d / "logits.jsonl").string().c_str(), "wb");
+        if (!logits_f_ || !logits_ix_) throw std::runtime_error("STRATA_LOGITS_DIR: cannot write in " + d.string());
+        logits_all_ = all && std::atoi(all) == 1;
+        std::fprintf(stderr, "strata-poly: STRATA_LOGITS_DIR: every row of logits into %s%s\n", dir,
+                     logits_all_ ? ", every prompt row's too (STRATA_LOGITS_ALL_ROWS)" : "");
+    }
+    if (guard) {
+        guard_f_ = std::fopen(guard, "wb");
+        if (!guard_f_) throw std::runtime_error(std::string("STRATA_GUARD_LOG: cannot write ") + guard);
+        std::fprintf(stderr, "strata-poly: STRATA_GUARD_LOG: the routed experts' down guard into %s (the layers are "
+                             "not replayed as CUDA graphs)\n", guard);
+    }
+}
+
+// A row of logits, in host memory, for the token at `pos`: the scores of the one after it.  n is its call's tokens,
+// `last` whether it is the row the caller asked for (eval()'s want_logits) or one STRATA_LOGITS_ALL_ROWS added.
+void Engine::dump_row(const float* row, int64_t pos, int32_t token, int n, bool last) {
+    if (std::fwrite(row, sizeof(float), (size_t) n_vocab_, logits_f_) != (size_t) n_vocab_)
+        throw std::runtime_error("STRATA_LOGITS_DIR: cannot write logits.f32");
+    std::fprintf(logits_ix_, "{\"row\":%lld,\"call\":%lld,\"pos\":%lld,\"token\":%d,\"src\":\"%s\",\"n\":%d,"
+                             "\"last\":%s}\n",
+                 logits_rows_++, logits_calls_, (long long) pos, (int) token, logits_src_, n, last ? "true" : "false");
+    std::fflush(logits_f_);
+    std::fflush(logits_ix_);
+}
+
+// STRATA_LOGITS_ALL_ROWS: rows [0, m) of the call at pos_, whose last layer is done (r_), each through the output
+// alone, as eval() takes a call's last row: the same norm over the rows, the same one-row product, into the dump.
+void Engine::dump_rows(const int32_t* tokens, int m) {
+    if (m <= 0) return;
+    output_rows(0, m, xn_);
+    for (int r = 0; r < m; ++r) {
+        lin(output_, xn_ + (size_t) r * n_embd_, logits_, 1);
+        finish_logits(logits_, 1);
+        ck(cudaMemcpyAsync(h_logits_, logits_, (size_t) n_vocab_ * sizeof(float), cudaMemcpyDeviceToHost, cs(st_)),
+           "logits dump");
+        ck(cudaStreamSynchronize(cs(st_)), "logits dump");
+        dump_row(h_logits_, pos_ + r, tokens[r], m, false);
+    }
+}
+
+// STRATA_GUARD_LOG: the powers of two guard_half_sums() gave `rows` rows of layer il's routed experts' down input
+// (1: left as they were), as a line: the call's position, the largest, how many were divided, any not finite.
+void Engine::guard_note(int il, const float* dev, int rows, const char* where) {
+    if (!guard_f_ || rows <= 0) return;
+    std::vector<float> h((size_t) rows);
+    ck(cudaStreamSynchronize(cs(st_)), "guard log");
+    ck(cudaMemcpy(h.data(), dev, (size_t) rows * sizeof(float), cudaMemcpyDeviceToHost), "guard log");
+    float most = 0.f;
+    int acted = 0, bad = 0;
+    for (float v : h) {
+        if (!std::isfinite(v)) {
+            ++bad;
+            continue;
+        }
+        most = std::max(most, v);
+        acted += v != 1.f;
+    }
+    std::fprintf(guard_f_, "{\"pos\":%lld,\"layer\":%d,\"rows\":%d,\"max\":%g,\"acted\":%d,\"nonfinite\":%d,"
+                           "\"path\":\"%s\"}\n",
+                 (long long) pos_, il, rows, most, acted, bad, where);
+    std::fflush(guard_f_);
+}
+
 void Engine::dbg(const char* name, int il, const float* dev, int n, const char* note, bool host) {
     if (!opt_.dump) return;
     std::vector<float> h((size_t) n);
@@ -4195,6 +4287,7 @@ bool Engine::moe(Layer& L, int il, int n, const std::function<void()>* first) {
                 if (guard_expert_down_) {
                     guard_half_sums(h_, (int64_t) ff, n_ff_exp_, m, hfd_, st_);
                     if (opt_.dump) dbg("ffn_moe_guard", il, hfd_, m, who(i0, m).c_str());
+                    guard_note(il, hfd_, m, "moe");
                 }
                 kernels::native_quantize_q8_1(h_, q8_, n_ff_exp_, m, st_);
                 if (!(m > 1 && kernels::native_mmvq_slots((int) L.d_type, down, m, n_ff_exp_, n_embd_, st_)))
@@ -4322,7 +4415,10 @@ bool Engine::moe_card(Layer& L, int il, int n) {
     if (gelu_) geglu_rows(g_, h_, n_ff_exp_, rr, st_, &es);
     else swiglu_clamp_rows(g_, h_, n_ff_exp_, rr, clamp_exp_[(size_t) il], st_, &es);
     if (!L.h_s_down.empty()) expert_weights(d_wts_, fp(L.s_down), d_ids_, rr, st_);
-    if (guard_expert_down_) guard_half_sums(h_, n_ff_exp_, n_ff_exp_, rr, hfd_, st_);   // as moe()'s
+    if (guard_expert_down_) {
+        guard_half_sums(h_, n_ff_exp_, n_ff_exp_, rr, hfd_, st_);   // as moe()'s
+        guard_note(il, hfd_, rr, "card");
+    }
     kernels::native_quantize_q8_1(h_, q8_, n_ff_exp_ * rr, 1, st_);   // the rows back to back, as one vector
     const kernels::MmvqIds down{table, d_ids_, L.gu2(), q8_, kernels::native_q8_1_bytes(n_ff_exp_), 1, d_,
                                 (size_t) n_embd_};
@@ -4696,6 +4792,7 @@ void Engine::moe_rows(Layer& L, int il, int n) {
             }
             if (guard) guard_half_sums(hx_, ff, n_ff_exp_, rc, hf_, st_);
             if (guard && opt_.dump) dbg("ffn_moe_guard", il, hf_, rc, "rows as ffn_moe_rows");
+            if (guard) guard_note(il, hf_, rc, "rows");
             Mmq::quantize(hx_, nullptr, mq2_, dt, ff, ff, rc, st_);
         }
         for (const Run& r : runs_)
@@ -4748,6 +4845,7 @@ void Engine::moe_rows(Layer& L, int il, int n) {
             if (gelu_) geglu_rows(gu_ + (size_t) r0 * ff2, hx_ + (size_t) r0 * ff, n_ff_exp_, rows, st_, &er);
             else swiglu_clamp_rows(gu_ + (size_t) r0 * ff2, hx_ + (size_t) r0 * ff, n_ff_exp_, rows, limit, st_, &er);
             if (guard) guard_half_sums(hx_ + (size_t) r0 * ff, ff, n_ff_exp_, rows, hf_ + r0, st_);
+            if (guard) guard_note(il, hf_ + r0, rows, "staged");
             Mmq::quantize(hx_ + (size_t) r0 * ff, nullptr, mq2_, dt, ff, ff, rows, st_);
             each_class([&](int k, int top) {
                 const int32_t* b = (n_tile == 1 ? d_rel + (g0 - n_cached + r)
@@ -4871,7 +4969,7 @@ void Engine::run(const int32_t* tokens, int n) {
     // What a launch needs of the position it reads at at_; an attention over the rows so far is recorded again
     // when the rows outgrow what it was sized for (head_key()).  A prompt's few tokens are not a window: they
     // leave no snapshots of the recurrent state, so their launches are others.
-    bool replay = opt_.graphs && n <= opt_.window && (windowed_ || block_pass_ || n == 1) && !opt_.dump;
+    bool replay = opt_.graphs && n <= opt_.window && (windowed_ || block_pass_ || n == 1) && !opt_.dump && !guard_f_;
     for (int t = 0; t < n && replay; ++t) replay = !image_at(pos_ + t);
     const auto replayed = [&](std::vector<void*>& made, size_t key, auto&& work) {
         if (made.size() <= key) made.resize(key + 1, nullptr);
@@ -5404,6 +5502,9 @@ void Engine::eval(const int32_t* tokens, int n, bool want_logits) {
         stats_.tokens += n;
         return;
     }
+    // STRATA_LOGITS_ALL_ROWS: the call's rows before the one the caller asks for, each as that one goes below
+    if (logits_f_) ++logits_calls_;
+    if (logits_all_) dump_rows(tokens, want_logits ? n - 1 : n);
     // The model's output: the last token's for the logits, and every token's for the draft block.
     if (want_logits || draft_) {
         const bool replay = opt_.graphs && n == 1 && want_logits && !opt_.dump;
@@ -5426,6 +5527,7 @@ void Engine::eval(const int32_t* tokens, int n, bool want_logits) {
             tail();
         }
         if (want_logits) ck(cudaStreamSynchronize(cs(st_)), "eval");
+        if (want_logits && logits_f_) dump_row(h_logits_, pos_ + n - 1, tokens[n - 1], n, true);
     }
     // behind the logits: the caller has them while the card does this
     if (draft_) draft_rows(tokens, ahead_pos_ == pos_ && tokens[0] == ahead_tok_ ? 1 : 0, n);
@@ -5467,6 +5569,12 @@ void Engine::layer(int il, int n) {
 bool Engine::read(const int32_t* tokens, int n, const Mark* marks, int n_marks,
                   const std::function<bool(int, int)>* turn) {
     if (n < 1 || n > read_rows_) throw std::logic_error("read takes 1 to max_read() tokens");
+    struct Src {   // STRATA_LOGITS_DIR: the rows dumped while this read runs are a read's
+        const char*& s;
+        const char* was;
+        ~Src() { s = was; }
+    } src{logits_src_, logits_src_};
+    logits_src_ = "read";
     for (const Image& im : images_)
         if (im.at < pos_ + n && im.at + im.n > pos_)
             throw std::logic_error("read takes no rows of a picture: eval() does, a picture a call");
@@ -5595,6 +5703,10 @@ bool Engine::read(const int32_t* tokens, int n, const Mark* marks, int n_marks,
                 if (host) ck(cudaStreamWaitEvent(cs(st_), (cudaEvent_t) ev_in_[c % 2], 0), "read");
                 if (il < n_layer_) {
                     layer(il, call.m);
+                    if (logits_f_ && il == n_layer_ - 1) {   // the call's rows are done: as eval() counts its calls
+                        ++logits_calls_;
+                        if (logits_all_) dump_rows(tokens + call.at, call.m);   // STRATA_LOGITS_ALL_ROWS
+                    }
                 } else {
                     output_rows(0, call.m, hn_ + n_embd_);
                     draft_rows(tokens + call.at, ahead_pos_ == pos_ && tokens[call.at] == ahead_tok_ ? 1 : 0, call.m);
