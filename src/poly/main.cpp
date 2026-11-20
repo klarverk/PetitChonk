@@ -1232,6 +1232,7 @@ void usage() {
                  "  --image-pad ID         the token whose runs in --tokens are the pictures' places, a token a row\n"
                  "  --dump-layers          print a checksum of every layer's stages to stderr\n"
                  "  --top-probs N          with --tokens: print the N most likely ids of every step to stderr\n"
+                 "  --tokens-file FILE / --follow-file FILE   the same ids as --tokens / --follow, from a file\n"
                  "  --follow ID,ID,...     with --tokens: write these tokens in place of the ones picked, for\n"
                  "                         --top-probs of the same answer under other settings\n"
                  "  --tail-skip N          an expert outside VRAM that every token of a window ranks at place N+1\n"
@@ -1360,6 +1361,25 @@ int main(int argc, char** argv) {
         else if (a == "--tokens" || a == "--eos-ids" || a == "--follow") {
             if (!parse_ids(val(), a == "--tokens" ? ids : a == "--eos-ids" ? eos : follow)) {
                 std::fprintf(stderr, "strata-poly: %s takes token ids separated by commas\n", a.c_str());
+                return 2;
+            }
+        } else if (a == "--tokens-file" || a == "--follow-file") {
+            // the same ids as --tokens / --follow, from a file: a 15K-token sequence does not fit a Windows command
+            // line (32,767 characters)
+            const char* path = val();
+            std::string text;
+            if (std::FILE* f = std::fopen(path, "rb")) {
+                char buf[1 << 16];
+                size_t got;
+                while ((got = std::fread(buf, 1, sizeof buf, f)) > 0) text.append(buf, got);
+                std::fclose(f);
+            }
+            while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ' ||
+                                     text.back() == '\t'))
+                text.pop_back();
+            if (!parse_ids(text.c_str(), a == "--tokens-file" ? ids : follow)) {
+                std::fprintf(stderr, "strata-poly: %s takes a file of token ids separated by commas (%s)\n",
+                             a.c_str(), path);
                 return 2;
             }
         } else {
