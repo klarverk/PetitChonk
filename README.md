@@ -65,7 +65,8 @@ Petit Chonk is built on other people's work:
 
 ## License
 
-MIT, like PolyStrata and Strata. [LICENSE](LICENSE) keeps both projects' copyright notices.
+MIT, like PolyStrata and [Strata](https://github.com/Niko1221/Strata). [LICENSE](LICENSE) keeps both projects'
+copyright notices.
 
 Petit Chonk's changes are not sent upstream. If a problem also happens on unchanged PolyStrata, report it to
 [PolyStrata](https://github.com/simplexai-labs/PolyStrata/issues).
