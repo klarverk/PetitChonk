@@ -208,7 +208,8 @@ if(STRATA_METAL_POLY)
   add_executable(strata-poly ${S}/poly/main.cpp ${S}/poly/engine.cpp ${S}/poly/qwen35.cpp
     ${S}/poly/gemma4.cpp ${S}/poly/lfm2moe.cpp ${S}/poly/glm5next.cpp ${S}/poly/deepseek4.cpp ${S}/poly/flint.cpp
     ${S}/poly/kolibri1.cpp ${S}/poly/cpu_experts.cpp ${S}/poly/spill.cpp ${S}/platform/memory.cpp
-    ${S}/core/conversation_memory.cpp ${S}/spec/draft_policy.cpp ${S}/spec/suffix_drafter.cpp)
+    ${S}/core/conversation_memory.cpp ${S}/core/conversation_file.cpp ${S}/spec/draft_policy.cpp
+    ${S}/spec/suffix_drafter.cpp)
   target_include_directories(strata-poly PRIVATE ${STRATA_GGML_DIR}/ggml/include ${STRATA_GGML_DIR}/ggml/src)
   target_link_libraries(strata-poly PRIVATE strata_poly_metal_kernels ggml-cpu ggml-base)
   target_compile_definitions(strata-poly PRIVATE STRATA_VERSION="0.1.45-metal-poly")

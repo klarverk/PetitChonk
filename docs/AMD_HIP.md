@@ -491,10 +491,18 @@ before it installs a model.
   free pool (an RX 7600 showed 48 MiB free after releasing 1 GiB, [#13](https://github.com/VecSzn/PolyStrata/issues/13)), so a long prompt was refused
   with "no VRAM for the attention cache". With the caches whole, 32K of context fits on 8 GB beside 4,592 of
   Qwen3.6's 10,496 experts (4.4 GiB).
-- Opt-in `--vram-pool` (strata-poly, one card, VMM): the engine claims the card's VRAM once at load, as 2 MiB
+- On Linux a card whose BAR does not cover its VRAM (a PC without Resizable BAR; the kernel log says
+  `Detected VRAM RAM=8176M, BAR=256M`) cannot use a mapping the moment ROCm returns from making it: amdgpu writes the
+  page tables with GPU jobs there, and ROCm's map does not wait for them. The engine faulted when the expert cache
+  grew after the first request (`Memory Fault Error ... kernel: __amd_rocclr_fillBufferAligned`, then `an illegal
+  memory access was encountered` from every request), in every start on two RX 5700 XT with the default reserve.
+  The engine now waits after it maps a piece (`Engine::vmm_settle()`: an ordinary allocation, which the kernel does
+  wait for). `STRATA_VMM_SETTLE=0` leaves the wait out. An engine from before that runs there with
+  `--vram-reserve-mib 512`, which keeps the cache from growing.
+- Opt-in `--vram-pool` (strata-poly, VMM): the engine claims the card's VRAM once at load, as 2 MiB
   handles, and keeps it for the whole run. The attention caches and the expert cache trade handles of that pool as the
   context grows and shrinks, and nothing is released to the card, so the "released VRAM never returns" above does not
-  arise (not tried on Linux ROCm). `--vram-reserve-mib` is then the margin left outside the pool (256 MiB at least),
+  arise. `--vram-reserve-mib` is then the margin left outside the pool (256 MiB at least),
   not VRAM kept free and idle. Under Windows the claim is sized by the budget Windows gives the process, read again
   every 256 MiB while the pool grows, because that budget falls as the process does (on an RX 5700 XT, 8 GB: 7,383
   to 6,956 MiB while 3.4 GiB were claimed), and memory past it is moved out to system RAM: sized from the card's free
@@ -506,7 +514,14 @@ before it installs a model.
   `--vram-pool` with a margin of 256 MiB held 1,882 and wrote 50 to 53, with the same 648 MiB of shared GPU memory and
   the prompt read at 312 against 314 tokens/s. A long read grows the pinned host buffers, which count as shared GPU
   memory (+460 MiB after a 53K prompt); that is not a spill. `STRATA_FREEZE_EXPERTS` cannot grow the caches past the
-  pool.
+  pool. On a layer split each card claims a pool of its own. Measured under Linux on two RX 5700 XT (8 GB each, BAR
+  256 MiB; i7-3770, 32 GB, ROCm 7.14.0a20260612 wheels) with Cyber-Tiel Coder 35B-A3B UD-Q4_K_XL,
+  `--max-context 262144 --kv q8_0 --cache-bias 0.5`, the same engine in alternating starts: `--kv-whole` with
+  `--vram-reserve-mib 512` held 4,053 experts and wrote three chats at 75.9 tokens/s; `--vram-pool` with a margin of
+  256 MiB claimed 5,582 and 5,242 MiB, held 5,768 and wrote them at 80.4, with 47% of the CPU in place of 56%. A
+  34K-token prompt read at 368 against 359 tokens/s and was written after at 69.3 against 67.7, and prompts of 30K to
+  116K tokens read and answered with no error. Those cards have no Resizable BAR: there a mapping is not usable the
+  moment it is made, and the pool needs the wait for it (`Engine::vmm_settle()`, above). That is the pool's only run on Linux ROCm so far.
 - Measured by the port's author on an RX 7600 (gfx1102, 8 GB; Ryzen 5 5600X, 30 GB of RAM) with the README's
   benchmark, `--kv-whole` on ([#13](https://github.com/VecSzn/PolyStrata/issues/13)):
 
@@ -994,8 +1009,8 @@ at capture time. It allocates no VRAM.
   reference its error is about 1e-8 on outputs of 0.005 to 0.03, the same size
   as the old kernels' (8e-9).
 * `=2` also quantizes each query to int8 in blocks of 32 values and computes
-  the scores with integer dot products (`dp4a`; on gfx1010 and gfx1012 the
-  same SDWA sequence the other kernels use). Its error against FP64 is
+  the scores with integer dot products (`dp4a`; on gfx1010 the same SDWA
+  sequence the other kernels use, on gfx1012 its native `v_dot4_i32_i8`). Its error against FP64 is
   1.2e-5 to 5.7e-5 on the same outputs, about 0.2% of the largest value. That
   is a different rounding of the query, not a reordering: judge it as you
   would a lower-precision attention. `=1` is the choice when exactness matters.

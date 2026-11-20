@@ -930,13 +930,52 @@ print(r.choices[0].message.content)
 - **Reading an agent's prompt start when the server starts (opt-in).** After a restart an agent's first request
   reads its whole prompt again. Claude Code's was 16,651 tokens in a test (11.1 s with Qwen3.6 on an 8 GB laptop),
   and 14,452 of them were the system prompt and the tool list, which every session in the same folder sends again.
-  `"warm_start": true` in `strata-<model>.json` keeps the first turn of the last request with tools (the system
-  prompt with the tools, when that is 2,048 tokens or more) in `strata-<model>.warm-start` next to the config, and
-  reads it when the server starts: 7.9 s for those 14,452 tokens. Claude Code's first request then had 12,288
-  tokens in common with the kept start and read the other 4,363 in 3.5 s. A request that comes in during that read
-  stops it and goes first (one sent 3 s after the start waited
+  `"warm_start": true` in `strata-<model>.json` (setup's `--warm-start`) keeps the first turn of the last request
+  with tools (the system prompt with the tools, when that is 2,048 tokens or more) in `strata-<model>.warm-start`
+  next to the config, and reads it when the server starts: 7.9 s for those 14,452 tokens. Claude Code's first
+  request then had 12,288 tokens in common with the kept start and read the other 4,363 in 3.5 s. A request that
+  comes in during that read stops it and goes first (one sent 3 s after the start waited
   0.5 s), and the part read stays cached. It is off by default because the read keeps the GPU busy at every start,
   also when no agent comes.
+
+  A first turn that leaves the kept one after 2,048 tokens or more (a date or a folder written near its end) keeps
+  the part the two have in common, which is what the next chat starts with too. `"warm_start": "agent.json"`
+  (setup's `--warm-start agent.json`) names a chat request, a JSON file with `messages` and `tools` as
+  `/v1/chat/completions` takes them, whose first turn is the start: an installation that knows its agent's system
+  prompt has it ready from the first start on, and a changed file is read at the next start. The file may come
+  later (the agent can write it): until it is there the server starts as it would without it.
+
+  With strata-poly answering one request at a time, the server also saves the kept start as a session file,
+  `strata-<model>.warm-start-<hash>.bin` next to the config, right after it read it, and has the engine pin it
+  (a pinned session, further down). A later start takes it from the file and reads nothing, and so does an engine
+  the server starts again after an unload. A new chat then goes on from the end of the system prompt whatever the
+  engine read in between. The file is written again at the next start when the kept start changed, and when the
+  engine refuses it (another engine version, model file or `--kv`).
+
+  Measured through the server on the card of the session-file measurement below (Qwen3.6 UD-Q3_K_M, the engine held
+  to 8.9 GB, the split of the experts frozen, a system prompt of placeholder text and one tool, 32 tokens greedy,
+  fp16 and q8_0, one run each). With 8,284 tokens the first token of a new chat came after 0.24 to 0.43 s, where a
+  server without `"warm_start"` took 1.49 to 1.74 s: right after the start, after a 16,000-token conversation of
+  another kind, and with the conversation cache on after six other conversations. Where that server still had a
+  checkpoint near the end of the system prompt it took 0.53 to 0.62 s. With 2,284 tokens: 0.24 to 0.31 s in place
+  of 0.83 to 1.06 s (0.68 to 0.69 s). At the first start the read, the save and the pin took 1.2 to 2.2 s; the
+  file is 212 to 350 MiB, and a later start pins it in 0.2 to 0.3 s. Before this, the warm start's read was kept
+  like any prompt (0.8 s for 2,284 tokens, 1.5 s for 8,284): with 8,284
+  tokens even the chats right after the first went on from 8,192 (0.51 to 0.55 s), because the conversation cache
+  had let the checkpoint at the end of the system prompt go.
+
+  With the system prompt and the seven tools of a real agent, taken from its first request (12,541 tokens, thinking
+  on as the agent asks): 0.24 to 0.38 s in place of 1.88 to 2.12 s, and in place of 0.62 to 0.95 s where the server
+  without the setting went on from 10,240 or 12,288 tokens. The file is 433 MiB (318 MiB as q8_0). The warm start
+  without the file went on from 10,240 from the second chat on (0.83 to 0.90 s).
+
+  The answers were the same as before the file: in all 37 cases a pinned server gave the 32 tokens of a server that
+  read the system prompt itself and the question from its end, whatever ran in between. They can differ from a
+  server without `"warm_start"`, which reads the system prompt and the question in one go: with the placeholder
+  prompt 10 of 24 answers parted somewhere in their first 170 characters (in the same places with fp16 and q8_0),
+  with the real one 8 of 12. The engine gives the same tokens
+  for the same reads (two such servers agreed in 12 of 12), but where a read starts changes its numbers slightly,
+  and that already happens today whenever a request goes on from a checkpoint.
 - **Streaming.** With `"stream": true` everything arrives as it is made: the thinking, the answer, and tool calls
   (the tool's name first, then its arguments piece by piece, like OpenAI and Anthropic do). While the model reads a
   long prompt the stream sends keep-alives, so agents do not time out; the server window prints progress every
@@ -1418,6 +1457,52 @@ more than 16 MiB apart. A symbolic link, a second hard link and a file with one 
 (the last also while a restored conversation was live, which then went on to answer); a fresh engine with another
 `--rope-freq-base` refused the file and then answered; a save with a RAM floor above the machine's RAM was refused as
 `memory` before any copy, the file it would have replaced untouched. The times are single runs.
+
+**strata-poly's session files.** strata-poly takes the same two requests and answers them in the same lines, with a
+file format of its own (the two engines do not read each other's files). A file holds the conversation in the engine
+as it stands: its tokens, its last two checkpoints (where its last turn began and the end of its prompt) with the
+state at its end as a third, and every token's rows in the attention caches. An edit before those checkpoints is read
+from the start after a restore. The rows go from the card to the file, and back, 16 MiB at a time, so a save or a
+restore holds no copy of the conversation in RAM; a restore holds the three states. A file is bound to the engine
+version, to the model's files (each one's size and its first and last MiB), to `--kv` and to the sizes of a row and of
+a state; the file ends in a hash of its bytes. A restore reads the file once: a file of another model or engine is
+refused before anything changes, and one whose hash fails at its end leaves the engine with no conversation, so the
+next request reads its prompt from the start. The conversation that was in the engine is parked first when the
+conversation cache has room for it. A save writes `NAME.part` beside the file and renames it; it does not flush the
+file to the disk, so a file cut short by a power loss fails its hash. It leaves 4096 MiB of the disk free (`507`
+otherwise). Not with `--batch` (the config's `"parallel"`). The server asks an engine for sessions only when its `INFO`
+line says `sessions=1`, so a strata-poly from before this answers `501`.
+
+**A pinned session (`strata-poly --pinned-session FILE`).** A system prompt that every chat starts with can be read
+once, saved as above, and given to the engine at its start. Its conversation then stays for the engine's whole run:
+its rows and states are kept in memory beside the conversation cache, outside `--conversation-cache-mib` and its slots
+(between requests they leave the process for a temporary file, as a parked conversation's do), and nothing pushes it
+out. A prompt that starts with it goes on from a copy of it, at the last of its checkpoints the prompt still shares, so
+a new chat reads only its own turn: after the engine's start, after other conversations took the engine, after a long
+chat that began with the same system prompt, and with the conversation cache off. The file is checked as a restore
+checks one. A file that does not fit (another model, engine version or `--kv`, or damaged) is named in the log and the
+engine starts without it; the `INFO` line says `pinned_tokens=N`. `PIN <path>` pins a file between requests as the
+option does at the start, in place of one pinned before, and answers `PINNED <tokens> <bytes> <ms>` or `SERR` as a
+session file's. The server uses it for `"warm_start"` (above): it reads the agent's system prompt once, saves it and
+pins it, and at later starts pins the file.
+
+On the card and with the settings of the measurement below, one run each: with a system turn of 8,005 tokens the first
+token of a new engine's first question came after 0.26 s in place of 1.56 s (fp16; q8_0 0.26 s in place of 1.53 s), and
+after 0.19 to 0.24 s where the cold engine had to read the system turn again (1.07 to 1.52 s): after a 16,000-token
+conversation of another kind, after a 16,000-token chat that began with the system turn, and with the conversation
+cache on after six other conversations. With 2,005 tokens: 0.26 to 0.30 s in place of 0.88 to 0.92 s, and 0.18 to
+0.23 s in place of 0.81 to 0.85 s. The 32 tokens of every answer were the cold engine's. The file is 345 MiB for 8,005
+tokens (fp16; 272 MiB as q8_0) and 165 MiB for 2,005 (146 MiB), read in 0.12 to 0.32 s at the start; the engine's VRAM
+is the same, and its own RAM after the first question 0 to 90 MiB more.
+
+Measured on an RTX PRO 6000 that other jobs were using, the engine held to 8.9 GB of it (4,127 of the 10,240 routed
+experts in VRAM, the split frozen with `STRATA_FREEZE_EXPERTS=1`), Qwen3.6 UD-Q3_K_M, NVMe, Linux, two runs: a
+conversation of 24,063 tokens is a file of 659 MiB (20 KiB a token and three states of 63 MiB), saved in 0.56 s and
+restored in the same engine in 0.33 s. A new engine process restored it in 1.5 s with the file out of the page cache
+and in 0.32 s with the file in it, where reading the prompt from its start took 2.8-2.9 s. For 8,063 tokens: 346 MiB,
+0.29-0.30 s, 0.22-0.25 s, 0.8 s, 0.22-0.24 s, and 1.3 s to read. In both engines the next turn went on from the file's
+last token and wrote the 64 tokens the first engine wrote without a restore. After a file with one bit changed was
+refused, the engine wrote what a new engine writes for the same prompt.
 
 **Current limits (v1):** one request at a time unless `"parallel": N` is set (opt-in batch slots, up to N requests
 decoded together: [BATCHING.md](BATCHING.md)), and one conversation cached at a time (switching between two chats
@@ -2468,3 +2553,14 @@ More classes than `8,16,32` gained nothing measurable. The gain depends on how u
 number of tokens in a batch, the number of experts, how many are cached in VRAM and the card's tile table; a
 card with a different MMQ tile table (`mmq-config-*.cuh`) may gain more, less or nothing. Only gfx1010 was
 measured.
+
+## Qwen35 temporary storage
+
+Qwen35 shares one aligned arena between recurrent and full-attention temporary
+buffers on CUDA/HIP. Members within each family remain disjoint; shared score
+storage, quantization work, persistent state and expert scratch remain separate.
+Metal keeps its existing allocation policy. No new user setting is required.
+
+On Tiel-Coder at prompt batch 2048, CUDA/SM89 tests of the allocation prototype
+saved 188.375 MiB logically (188 MiB observed allocation granularity). Savings
+scale with model geometry and batch size. Extra capacity can hold more GPU experts.

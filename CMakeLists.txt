@@ -1469,6 +1469,29 @@ if(STRATA_NATIVE_EXPERTS)
     endif()
     add_subdirectory(${strata_llamacpp_SOURCE_DIR}/ggml ${CMAKE_BINARY_DIR}/ggml EXCLUDE_FROM_ALL)
   endif()
+  # Clang turns ggml-cpu's i-quant grid lookups (_mm256_set_epi32 of eight table loads, IQ2_*/IQ3_*) into
+  # vpgatherdd, which Intel's Gather Data Sampling microcode mitigation (2023) made slow on Skylake to Tiger Lake.
+  # -mno-gather keeps them scalar loads: the same values, so the same products.  On an i9-9980HK (Windows, ROCm's
+  # clang, one thread) a 2048-value IQ2_S row went from 500 to 183 ns and an IQ3_XXS row from 978 to 269 ns;
+  # IQ4_XS, Q3_K and Q8_0 rows did not move.  On by default only where a GNU-style clang compiles ggml-cpu for
+  # x86-64 on an Intel CPU (the Windows HIP build on one: the engine is compiled on the PC it runs on); it was not
+  # measured on an AMD CPU or on an Intel one newer than Tiger Lake.  -DSTRATA_CPU_NO_GATHER=ON / OFF sets it.
+  set(_strata_no_gather_default OFF)
+  if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND NOT CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND
+     CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|amd64)$" AND NOT STRATA_ISA_FLOOR)
+    cmake_host_system_information(RESULT _strata_host_cpu QUERY PROCESSOR_DESCRIPTION)
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag(-mno-gather STRATA_HAVE_MNO_GATHER)
+    if(STRATA_HAVE_MNO_GATHER AND _strata_host_cpu MATCHES "GenuineIntel")
+      set(_strata_no_gather_default ON)
+    endif()
+  endif()
+  option(STRATA_CPU_NO_GATHER "Compile ggml-cpu with -mno-gather (scalar table loads in place of gathers)"
+         ${_strata_no_gather_default})
+  if(STRATA_CPU_NO_GATHER AND TARGET ggml-cpu)
+    message(STATUS "ggml-cpu: -mno-gather (STRATA_CPU_NO_GATHER)")
+    target_compile_options(ggml-cpu PRIVATE $<$<COMPILE_LANGUAGE:C,CXX>:-mno-gather>)
+  endif()
   # part of strata_kernels_cpu (the pool calls these and they call its CPU probe: one library, so GNU ld's
   # one-pass static linking has no cycle to resolve)
   target_sources(strata_kernels_cpu PRIVATE src/kernels/cpu/native_expert.cpp src/kernels/cpu/iq_avx512.cpp
@@ -1993,6 +2016,8 @@ if(STRATA_BUILD_TESTS)
   add_test(NAME poly_hip_value_split_policy_test COMMAND poly_hip_value_split_policy_test)
   add_executable(poly_gdn_mma_control_test src/poly/gdn_mma_control_test.cpp)
   add_test(NAME poly_gdn_mma_control_test COMMAND poly_gdn_mma_control_test)
+  add_executable(poly_q35_scratch_arena_test src/poly/q35_scratch_arena_test.cpp)
+  add_test(NAME poly_q35_scratch_arena_test COMMAND poly_q35_scratch_arena_test)
   add_executable(poly_stream_stage_test src/poly/stage_copy_test.cpp)
   add_test(NAME poly_stream_stage_test COMMAND poly_stream_stage_test)
 endif()
@@ -2037,6 +2062,23 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
       set(_strata_gg ${strata_llamacpp_SOURCE_DIR}/ggml)
     endif()
     set(_strata_mmq ${_strata_gg}/src/ggml-cuda)
+  endif()
+  # Navi 12 / Navi 14 (gfx1011, gfx1012) have the signed dot4 that llama.cpp's ggml_cuda_dp4a leaves to RDNA1's SDWA
+  # sequence (its vendors/hip.h counts gfx1012 as RDNA1); include/strata/hip_compat/intrinsics.hpp has the
+  # measurement.  A HIP build for either has the checkout's common.cuh take __builtin_amdgcn_sdot4 there as well: the
+  # same products.  The checkout is downloaded, not part of this tree, so it is patched here, once, by its exact line;
+  # STRATA_GFX1012_SDWA_DOT=ON (cmake/hip_backend.cmake) leaves it as it is.
+  if(STRATA_ENABLE_HIP AND CMAKE_HIP_ARCHITECTURES MATCHES "gfx101[12]" AND NOT STRATA_GFX1012_SDWA_DOT)
+    set(_strata_cc ${_strata_mmq}/common.cuh)
+    file(READ ${_strata_cc} _strata_cc_text)
+    set(_strata_cc_old "#if defined(CDNA) || defined(RDNA2) || defined(__gfx906__)\n    c = __builtin_amdgcn_sdot4")
+    set(_strata_cc_new "#if defined(CDNA) || defined(RDNA2) || defined(__gfx906__) || defined(__gfx1011__) || defined(__gfx1012__)\n    c = __builtin_amdgcn_sdot4")
+    string(FIND "${_strata_cc_text}" "${_strata_cc_old}" _strata_cc_at)
+    if(_strata_cc_at GREATER -1)
+      string(REPLACE "${_strata_cc_old}" "${_strata_cc_new}" _strata_cc_text "${_strata_cc_text}")
+      file(WRITE ${_strata_cc} "${_strata_cc_text}")
+      message(STATUS "gfx1011/gfx1012: ${_strata_cc}'s ggml_cuda_dp4a takes the signed dot4")
+    endif()
   endif()
   set(_strata_poly_mmq_instances "")
   foreach(_t q4_0 q4_1 q5_0 q5_1 q8_0 q2_k q3_k q4_k q5_k q6_k iq1_s iq2_xxs iq2_xs iq2_s iq3_xxs iq3_s iq4_nl
@@ -2110,7 +2152,8 @@ if(STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP) AND NOT S
   add_executable(strata-poly src/poly/main.cpp src/poly/engine.cpp src/poly/glm5next.cpp src/poly/qwen35.cpp
                             src/poly/gemma4.cpp src/poly/deepseek4.cpp src/poly/lfm2moe.cpp src/poly/flint.cpp
                             src/poly/kolibri1.cpp src/poly/mistral4.cpp src/poly/cpu_experts.cpp src/poly/kernels.cu
-                            src/poly/kernels_dsv4.cu src/poly/spill.cpp src/core/conversation_memory.cpp)
+                            src/poly/kernels_dsv4.cu src/poly/spill.cpp src/core/conversation_memory.cpp
+                            src/core/conversation_file.cpp)
   target_include_directories(strata-poly PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gpu_include_directories})
   # the driver's virtual memory calls: the attention caches grow with the conversation; on HIP they are HIP's
   # memory management calls, which the HIP runtime itself provides (hip_compat/cuda.h)

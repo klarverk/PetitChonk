@@ -256,12 +256,21 @@ class WindowsDetection(unittest.TestCase):
 
     def test_rx_5700_xt_is_gfx1010(self):
         """PCI 731F (RX 5600 XT / 5700 / 5700 XT, Navi 10) is gfx1010, and so is the name of one whose id is not
-        listed; the RX 5500 (gfx1012, Navi 14) is not taken for it."""
+        listed; the RX 5500 (gfx1012, Navi 14) is not taken for it (it is known only with STRATA_EXPERIMENTAL_GFX1012=1)."""
         self.assertEqual(setup.win_amd_arch(0x731F, "AMD Radeon RX 5700 XT"), "gfx1010")
         self.assertEqual(setup.win_amd_arch(0x1234, "AMD Radeon RX 5600 XT"), "gfx1010")
         self.assertEqual(setup.win_amd_arch(0x1234, "AMD Radeon RX 5700"), "gfx1010")
-        self.assertEqual(setup.win_amd_arch(0x7340, "AMD Radeon RX 5500 XT"), "")
+        self.assertEqual(setup.win_amd_arch(0x7340, "AMD Radeon RX 5500 XT"), "gfx1012" if setup.GFX1012_OPT_IN else "")
         self.assertIsNone(setup.amd_problem({"arch": "gfx1010"}))
+
+    def test_gfx1012_is_opt_in(self):
+        """STRATA_EXPERIMENTAL_GFX1012: unset, setup does not know Navi 14 (RX 5500 XT, Radeon Pro 5500M / 5300M); set
+        to 1 (run this file with it), the card is gfx1012 by its PCI id and by its name, and Navi 10 stays gfx1010."""
+        self.assertEqual("gfx1012" in setup.AMD_ARCHS, setup.GFX1012_OPT_IN)
+        want = "gfx1012" if setup.GFX1012_OPT_IN else ""
+        self.assertEqual(setup.win_amd_arch(0x7340, ""), want)
+        self.assertEqual(setup.win_amd_arch(0x1234, "AMD Radeon Pro 5500M"), want)
+        self.assertEqual(setup.win_amd_arch(0x1234, "AMD Radeon RX 5700 XT"), "gfx1010")
 
     def test_cpu_vision_build_uses_the_visual_studio_environment(self):
         """#881: build_vision_cpu on Windows hands cmake_build the vcvars file and a real .bat name (it passed None and
