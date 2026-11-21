@@ -3,54 +3,147 @@
 <p align="center"><b>Mistral Small 4 on one 16 GB graphics card and system RAM</b><br>
 A fork of <a href="https://github.com/simplexai-labs/PolyStrata">PolyStrata</a></p>
 
-> **Status: early.** No Mistral Small 4 support has been written, built or tested yet. Everything that runs here
-> today is PolyStrata's.
+Petit Chonk brings [Mistral Small 4](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603) (119B parameters,
+6.5B active per token) to PolyStrata's mixture-of-experts engine, `strata-poly`. The experts used most sit in the
+graphics card's memory and the rest in system RAM, and when RAM runs short they are read back from the drive. A
+100B-class model then runs on one 16 GB card.
 
-## The goal
+**Why not Qwen?** If Qwen fits your needs, use it: PolyStrata runs it well. Petit Chonk exists so that a European
+open-weight model has a place in the same engine. Mistral Small 4 comes from Mistral AI in Paris under the Apache 2.0
+licence, with reasoning you switch on per request. Local AI is more robust when it doesn't depend on one region's
+models.
 
-Run [Mistral Small 4](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603) (`mistralai/Mistral-Small-4-119B-2603`)
-on a normal PC by adding it to PolyStrata's second engine, `strata-poly`.
+**Verified, not just running.** Petit Chonk's outputs were compared with llama.cpp's on the same model file, under
+acceptance rules fixed before any of its results existed. See [How it was checked](#how-it-was-checked).
 
-Mistral Small 4 is a 119B mixture-of-experts model. Each of its 36 layers has 128 experts. For each token the model
-uses four of them plus one shared expert. Only a small part of the weights is used per token, but all of them must be
-stored somewhere. `strata-poly` already handles models like this. It keeps a cache of experts on the graphics card
-and the rest in system RAM, and it can run experts on the CPU or the GPU. For Mistral Small 4 it still needs:
+## What is supported
 
-- the model's attention (multi-head latent attention) and its compressed attention cache;
-- the model's tokenizer (Tekken) and chat format, including both reasoning settings, `none` and `high`.
+- **One model:** Mistral Small 4, text only, from Unsloth's `UD-Q4_K_M` file
+  ([`unsloth/Mistral-Small-4-119B-2603-GGUF`](https://huggingface.co/unsloth/Mistral-Small-4-119B-2603-GGUF),
+  revision `bd93c721`, 73.8 GB). Other quantizations may run, but are not verified.
+- **NVIDIA graphics cards (CUDA).** Tested on Windows 11 with an RTX 5080 (16 GB) and 128 GB of RAM. The
+  ready-made engine is built for RTX 20 to RTX 50 cards; only the RTX 5080 has been tried.
+- **PolyStrata's other models** are still in the code, but this fork does not test them. For those, use
+  [PolyStrata](https://github.com/simplexai-labs/PolyStrata).
+- **The AMD (HIP), Intel (SYCL) and Apple (Metal) backends are neither built nor tested here**, and setup does not
+  offer Mistral Small 4 on them. If they matter to you, sponsorship is welcome and would make that work possible:
+  [Patreon](https://patreon.com/Patternwright).
 
-The first target is text only: Windows 11, one NVIDIA RTX 5080 with 16 GB plus 32 GB of RAM, one request at a
-time and one GGUF file.
+## What you need
 
-Two rules come before speed:
+- An NVIDIA card with 16 GB of VRAM. Setup's estimate for a smaller card is that more of every answer runs on
+  the CPU, so it is slower (not measured).
+- **RAM:** about 70 GB beside a 16 GB card, by setup's estimate. With 64 GB it still runs, but its experts come
+  from the drive while it writes: about 4 tokens/s instead of 16–20 (measured, see [Speed](#speed)).
+- About 75 GB of disk for the model file, on a fast SSD.
+- Windows 11 (tested). Linux is not tested.
 
-- **Faithful.** The port computes what the model computes: the four chosen experts and the shared expert, with
-  no experts skipped and no values clipped.
-- **Measured.** A result counts only after it has been compared with a reference on the same model file and
-  inputs. A model that loads, or that writes fluent text, has not passed.
+Writing speed depends mostly on RAM bandwidth and VRAM: more of either helps.
 
-The last step decides whether the port is worth using. It measures the port against
-[ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) on the same machine.
+## Install
 
-## Plan
+On Windows, run `START-HERE.bat` (or `SETUP.bat`) and pick Mistral Small 4, or:
 
-1. Record the starting point: source commits, model file hashes, the machine and the build.
-2. Make one Mistral transformer layer match a reference.
-3. Run all layers. Compare the final outputs on fixed inputs, and check that the tokenizer gives the same token IDs
-   as the official one.
-4. Add chat: both reasoning settings, streaming, tool calls, and saving and restoring conversations.
-5. Measure speed and memory on the target machine with 8K, 32K and 64K tokens of context, against ik_llama.cpp.
+```
+SETUP.bat --family mistral4
+```
 
-Vision, speculative decoding, multiple GPUs and a quantized attention cache wait until all five steps are done.
+Setup downloads the ready-made `strata-poly` engine from this repository's releases, the model file (pinned and
+checked by SHA-256) and the Python packages, and writes a run config. A model file you already have can be used in
+place with `--gguf-dir <its folder>`.
 
-Step 1 has not started.
+The run config setup writes is the one that was verified:
+- **16K tokens of context** (recommended). 32K, 64K and 128K are offered, marked "not verified for this model".
+- **One token a step** (`--lookup 0 --window 1`): the engine's guessing ahead is off for this model.
 
-## Using it today
+The server then answers at `http://127.0.0.1:8080/v1` (OpenAI) and `/v1/messages` (Anthropic), with a web app at
+`http://127.0.0.1:8080/`.
 
-Apart from its name in the web app and the window titles, the code here is PolyStrata's. The installer, server,
-web app and supported models are PolyStrata's too, and [PolyStrata's README](https://github.com/simplexai-labs/PolyStrata#readme)
-and the [docs](docs/) folder describe them. The translated READMEs (`README.de.md`, `README.es.md`, `README.fr.md`,
-`README.ja.md`, `README.pt-BR.md`, `README.tr.md`, `README.zh-CN.md`) are PolyStrata's, and describe PolyStrata.
+## Thinking
+
+Mistral Small 4 answers directly or reasons first. Its chat template has two settings, `none` and `high`:
+- no thinking, or none asked for, gives `none`;
+- any level a client asks for (low, medium, high) gives `high`.
+
+The reasoning comes back apart from the answer, as other models' reasoning does.
+
+## Not supported yet
+
+- **Tool calls:** Mistral's tool-call format is not read, so a tool call arrives as plain text.
+- **Images:** the model's image input is not supported.
+- **Guessing ahead** (speculative decoding) is off for this model.
+- **Contexts above 16K** run, but their outputs have not been checked against llama.cpp.
+
+## Accuracy
+
+Both engines ran the same `UD-Q4_K_M` file on the same inputs, scored the same way. The figures are from Petit
+Chonk's native build of the release source. The ready-made engine gave byte-identical results to it on the CPU in a
+spot check, and passed the same frozen check as below (worst statistic 0.43 of its threshold).
+
+| Benchmark | Petit Chonk | llama.cpp |
+|---|---|---|
+| WikiText-2 perplexity (73 windows of 4,096 tokens; lower is better) | 5.889 | 5.864 |
+| ARC-Challenge (300 questions) | 62.7% | 62.3% |
+| CommonsenseQA (300) | 67.7% | 68.0% |
+| MMLU (300) | 76.3% | 76.7% |
+| All 900 | 68.9% | 69.0% |
+
+- **Perplexity ratio:** 1.0042, with a 95% interval of 0.9987–1.0100 (bootstrap over windows).
+- **The questions:** the two engines picked the same answer on 93.9% of them. Where they differed, neither was
+  right more often (McNemar p = 1.0 on every set).
+- **One outlier:** on one token of 298,935 Petit Chonk's probability differs from llama.cpp's far more than on any
+  other. Its cause is not established. llama.cpp's own CPU and GPU paths disagree at that token too.
+- The questions were drawn by a fixed seed and the scoring fixed before either engine ran. The formats are
+  lm-evaluation-harness's.
+
+## Speed
+
+Writing speed is close to llama.cpp's: about the same on the first answer, 20–50% faster once its expert cache has
+warmed up. Reading long prompts is where it gains most, about 3×.
+
+Tokens per second on one PC: RTX 5080 16 GB, i9-10850K, 128 GB of DDR4-3200, Windows 11. The model is `UD-Q4_K_M`,
+with the run config setup writes. Petit Chonk's figures are after its expert cache has warmed up (three requests).
+llama.cpp is `llama-bench` with the experts of the first four layers on the card, its best placement there.
+
+| Prompt | Reading the prompt: Petit Chonk | llama.cpp | Writing: Petit Chonk | llama.cpp |
+|---|---|---|---|---|
+| 1,024 tokens | 147–198 | 103 | 16–18 | 13.5 |
+| 8,192 tokens | 379–381 | 117 | 16–20 | 13.3 |
+| 16,000 tokens | 288–290 | 113 | 17–19 | 13.5 |
+
+- **The first request after a start is slower,** while the expert cache fills. With a 16,000-token prompt it read
+  68 tokens/s and wrote 16.6.
+- **Longer contexts** (they run; outputs not checked): a 32,512-token prompt was read in 2.9 minutes and then
+  13.3 tokens/s written. A 65,280-token prompt took 12.5 minutes, then 12.6 tokens/s.
+- **With 64 GB of RAM** (emulated by locking 64 GiB on the same PC): about 4 tokens/s written, and prompts read at
+  about 320 tokens/s.
+- **Not measured:** other cards and PCs, contexts above 64K, PCs with less than 64 GB, several requests at once.
+
+## How it was checked
+
+- **The reference:** llama.cpp (commit `c7518dbe`) on the same model file. The thresholds come from llama.cpp's own
+  spread between legitimate settings: chunked prompts, flash attention off, unfused operations, the CPU instead of
+  the GPU, and token-by-token decoding.
+- **The inputs:** 7 fixed token sequences, 26,016 positions, up to 16K tokens long. The tokenizer gives the same
+  token ids as Mistral's own (`mistral-common`) on all 7, and on 44 million characters checked separately.
+- **The rule:** a frozen acceptance contract judged every position's full output distribution, not only the top
+  token.
+- **The result:** passed in all 10 run sets (70 runs). They cover whole, chunked and split prompts and token-by-token
+  decoding, with the experts on the card or on the CPU. The worst statistic reached 0.47 of its threshold.
+  - On the release source, after merging current PolyStrata, a re-check passed (worst 0.39).
+  - The ready-made engine passed the same re-check (worst 0.43).
+- **What this shows:** Petit Chonk computes what llama.cpp computes, within llama.cpp's own spread, for this model
+  file on these inputs. It is the project's own check, not an independent one. Other quantizations, cards,
+  operating systems, sampling and contexts above 16K are not covered.
+
+The tools are in [`tools/mistral4/`](tools/mistral4/). Details: [docs/MISTRAL4.md](docs/MISTRAL4.md).
+
+## Using the rest of PolyStrata
+
+Apart from Mistral Small 4 and the name in the web app and window titles, the code here is PolyStrata's.
+[PolyStrata's README](https://github.com/simplexai-labs/PolyStrata#readme) and the [docs](docs/) folder describe it.
+The translated READMEs (`README.de.md`, `README.es.md`, `README.fr.md`, `README.ja.md`, `README.pt-BR.md`,
+`README.tr.md`, `README.zh-CN.md`) are PolyStrata's, and describe PolyStrata.
 
 ## Credits
 
