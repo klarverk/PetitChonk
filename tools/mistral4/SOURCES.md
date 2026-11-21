@@ -1,8 +1,9 @@
 # Sources of these tools
 
 Each file is a copy of the tool that produced Petit Chonk's records, with only its local paths replaced
-(`publish_tools.py`; the substitutions are the only differences). The original path is in the work
-folder the records name.
+(`publish_tools.py`). The substitutions are the only differences, apart from line endings: every
+copy has LF, where some originals have CRLF. The original path is in the work folder the records
+name.
 
 "This file's SHA-256" is of the file as stored in the repository, with LF line endings. A checkout
 that converts line endings (Git's `core.autocrlf` on Windows, and `.gitattributes`' `*.bat eol=crlf`)
@@ -12,13 +13,13 @@ gives other bytes; `git show HEAD:<path> | sha256sum` gives the stored ones.
 |---|---|---|---|---|
 | `fti/make_sequences.py` | `scripts/fti/t3/make_sequences.py` | `553865d943159132…` | `8b1fd2d13d7f5663…` | 4 |
 | `fti/ref_logits.cpp` | `scripts/fti/t4/ref_logits.cpp` | `c66897fa173a71a7…` | `c66897fa173a71a7…` | 0 |
-| `fti/build_ref_logits.bat` | `scripts/fti/t4/build_ref_logits.bat` | `2a3387cbd340fdaf…` | `4c8831af1748bff9…` | 2 |
+| `fti/build_ref_logits.bat` | `scripts/fti/t4/build_ref_logits.bat` | `2a3387cbd340fdaf…` | `c44ef9f6874c39ba…` | 2 |
 | `fti/t4_runs.py` | `scripts/fti/t4/t4_runs.py` | `137df20a468e3502…` | `fc5f811447ec2fdc…` | 3 |
 | `fti/t6_measure.py` | `scripts/fti/t6/t6_measure.py` | `a5b9be024d68c66d…` | `a5b9be024d68c66d…` | 0 |
 | `fti/t6_contract_eval.py` | `scripts/fti/t6/t6_contract_eval.py` | `1ff59e522fa8f261…` | `3b06433f885f4f12…` | 2 |
 | `fti/t6_rule.py` | `scripts/fti/t6/t6_rule.py` | `f34a77b24e986205…` | `d2930f06acc5c235…` | 2 |
 | `fti/t8_run.py` | `scripts/fti/t6/t8_run.py` | `67ce2228fe8f618b…` | `10523fe48bf9f38b…` | 3 |
-| `fti/thresholds_UD-Q4_K_M.json` | `fti/t6/thresholds_UD-Q4_K_M.json` | `e5ea6dfb14fe0679…` | `e5ea6dfb14fe0679…` | 0 |
+| `fti/thresholds_UD-Q4_K_M.json` | `fti/t6/thresholds_UD-Q4_K_M.json` | `e5ea6dfb14fe0679…` | `fee374df0715ea7f…` | 0 |
 | `bench/fetch_sources.py` | `scripts/pub/p4/fetch_sources.py` | `81325ebc9f0f169f…` | `81325ebc9f0f169f…` | 0 |
 | `bench/fetch_mmlu_yaml.py` | `scripts/pub/p4/fetch_mmlu_yaml.py` | `7306f19bbb4c6234…` | `7306f19bbb4c6234…` | 0 |
 | `bench/freeze_a.py` | `scripts/pub/p4/freeze_a.py` | `72e78aaedbd796f5…` | `b4986686247a7232…` | 1 |
