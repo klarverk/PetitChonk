@@ -15,6 +15,10 @@ that the version numbers describe is:
 
 ## [Unreleased]
 
+### Changed
+
+- Setup's first line names Petit Chonk and Mistral Small 4, in place of PolyStrata's line about its own models.
+
 ## [1.0.0] - 2026-11-21
 
 The first release. Upstream base: PolyStrata

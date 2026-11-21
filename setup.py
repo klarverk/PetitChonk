@@ -8070,7 +8070,7 @@ def main() -> int:
             a.gpu = int(a.gpu)
         else:
             ap.error(f"--gpu takes a GPU number as nvidia-smi numbers them, e.g. --gpu 1 (or --gpus 0,2), not {a.gpu!r}")
-    say("PolyStrata - Qwen3.8-Flash-Next, GLM 5.3 Flash and smaller MoE models on a normal PC (a GPU + system RAM + CPU)")
+    say("Petit Chonk - Mistral Small 4 on one 16 GB graphics card and system RAM (a fork of PolyStrata)")
     data, elsewhere = data_folder(a.data_dir)          # the model files: in the data folder, found from any copy
     roots = [data, *elsewhere]
     if a.models_dir is None:

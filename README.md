@@ -150,7 +150,8 @@ The tools are in [`tools/mistral4/`](tools/mistral4/). Details: [docs/MISTRAL4.m
 
 ## Using the rest of PolyStrata
 
-Apart from Mistral Small 4 and the name in the web app and window titles, the code here is PolyStrata's.
+Apart from Mistral Small 4 and the name in the web app, the window titles and setup's first line, the code here is
+PolyStrata's.
 [PolyStrata's README](https://github.com/simplexai-labs/PolyStrata#readme) and the [docs](docs/) folder describe it.
 The translated READMEs (`README.de.md`, `README.es.md`, `README.fr.md`, `README.ja.md`, `README.pt-BR.md`,
 `README.tr.md`, `README.zh-CN.md`) are PolyStrata's, and describe PolyStrata.
