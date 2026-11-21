@@ -15,7 +15,9 @@ that the version numbers describe is:
 
 ## [Unreleased]
 
-Planned as 1.0.0, the first release. Upstream base: PolyStrata
+## [1.0.0] - 2026-11-21
+
+The first release. Upstream base: PolyStrata
 [`3e1642161198c50ff1abed4046f4e4f476099dbb`](https://github.com/simplexai-labs/PolyStrata/commit/3e1642161198c50ff1abed4046f4e4f476099dbb).
 
 ### Added
@@ -36,7 +38,9 @@ Planned as 1.0.0, the first release. Upstream base: PolyStrata
   file.
 - An opt-in logits dump for verification runs (`STRATA_LOGITS_DIR`). It is off unless the variable is set.
 - The verification tools in `tools/mistral4/`: the full-model check against llama.cpp, with the thresholds the
-  verdict used, and the accuracy benchmark harness.
+  verdict used, the accuracy benchmark harness, and the speed runner.
+- `docs/MISTRAL4.md`: what runs, what setup writes, how the port was verified, and the accuracy and speed figures
+  with their scope.
 - A Sponsor button (`.github/FUNDING.yml`, Patreon).
 - The Petit Chonk logos, dark and light (`docs/media/`).
 
@@ -45,9 +49,11 @@ Planned as 1.0.0, the first release. Upstream base: PolyStrata
 - The name in the web app and the window titles: PolyStrata becomes Petit Chonk.
 - Setup downloads its ready-made `strata-poly` engine from Petit Chonk's releases. A checkout with no matching
   release asset compiles the engine, as before.
-- The README describes the fork and credits PolyStrata, [Strata](https://github.com/Niko1221/Strata), llama.cpp,
-  Mistral AI and Unsloth.
+- The README describes Petit Chonk: what is supported and needed, the install, and its accuracy and speed against
+  llama.cpp. It credits PolyStrata, [Strata](https://github.com/Niko1221/Strata), llama.cpp, Mistral AI and
+  Unsloth.
 - `LICENSE` adds Petit Chonk's copyright line beside the Strata project's and PolyStrata's.
 - `SECURITY.md` sends vulnerability reports to this repository.
 
-[Unreleased]: https://github.com/klarverk/PetitChonk/compare/3e1642161198c50ff1abed4046f4e4f476099dbb...main
+[Unreleased]: https://github.com/klarverk/PetitChonk/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/klarverk/PetitChonk/compare/3e1642161198c50ff1abed4046f4e4f476099dbb...v1.0.0
