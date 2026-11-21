@@ -2,15 +2,16 @@
 
 ## Reporting a vulnerability
 
-Please report anything that should not be public until it is fixed **privately**, through GitHub's private
-vulnerability reporting: the repository's **Security** tab, **Report a vulnerability**
-([direct link](https://github.com/VecSzn/PolyStrata/security/advisories/new)). Say what you found, how to reproduce it
-(the request, the config keys involved, the PolyStrata version), and what an attacker gains. We answer there, fix it in
-a release, and credit you in the advisory unless you ask us not to.
+This is Petit Chonk, a fork of [PolyStrata](https://github.com/simplexai-labs/PolyStrata). Please report anything
+that should not be public until it is fixed **privately**, through GitHub's private vulnerability reporting: this
+repository's **Security** tab, **Report a vulnerability**
+([direct link](https://github.com/klarverk/PetitChonk/security/advisories/new)). Say what you found, how to reproduce
+it (the request, the config keys involved, the Petit Chonk version), and what an attacker gains. We answer there, fix
+it in a release, and credit you in the advisory unless you ask us not to. If it also affects unchanged PolyStrata,
+report it to [PolyStrata](https://github.com/simplexai-labs/PolyStrata/security/advisories/new) as well.
 
 Ordinary hardening ideas and findings that are safe to discuss in public are welcome as an
-[issue](https://github.com/VecSzn/PolyStrata/issues) (#544 collects audit findings) or as a pull request, which we
-review like our own code.
+[issue](https://github.com/klarverk/PetitChonk/issues).
 
 Supported: the latest release. Fixes go into the next release, not into older ones.
 

@@ -49,7 +49,8 @@ Step 1 has not started.
 
 Apart from its name in the web app and the window titles, the code here is PolyStrata's. The installer, server,
 web app and supported models are PolyStrata's too, and [PolyStrata's README](https://github.com/simplexai-labs/PolyStrata#readme)
-and the [docs](docs/) folder describe them.
+and the [docs](docs/) folder describe them. The translated READMEs (`README.de.md`, `README.es.md`, `README.fr.md`,
+`README.ja.md`, `README.pt-BR.md`, `README.tr.md`, `README.zh-CN.md`) are PolyStrata's, and describe PolyStrata.
 
 ## Credits
 
@@ -61,12 +62,16 @@ Petit Chonk is built on other people's work:
 - **[Strata](https://github.com/Niko1221/Strata)** by Niko1221 and its contributors, which PolyStrata is built on.
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)**. It runs Mistral Small 4 with its DeepSeek2 graph, which is
   the reference for this port.
-- **[Mistral AI](https://mistral.ai)**, which made Mistral Small 4.
+- **[Mistral AI](https://mistral.ai)**, which made Mistral Small 4 and publishes it under the
+  [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) licence.
+- **[Unsloth](https://unsloth.ai)**, whose GGUF quantizations of Mistral Small 4
+  ([`unsloth/Mistral-Small-4-119B-2603-GGUF`](https://huggingface.co/unsloth/Mistral-Small-4-119B-2603-GGUF))
+  Petit Chonk is verified on.
 
 ## License
 
 MIT, like PolyStrata and [Strata](https://github.com/Niko1221/Strata). [LICENSE](LICENSE) keeps both projects'
-copyright notices.
+copyright notices and adds Petit Chonk's.
 
 Petit Chonk's changes are not sent upstream. If a problem also happens on unchanged PolyStrata, report it to
 [PolyStrata](https://github.com/simplexai-labs/PolyStrata/issues).
