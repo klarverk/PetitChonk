@@ -16,6 +16,7 @@ and the formats change often; the engine boundary is token ids in, text deltas o
 from __future__ import annotations
 
 import ast
+import datetime
 import json
 import logging
 import os
@@ -38,10 +39,19 @@ class TemplateRequestError(jinja2.exceptions.TemplateError, ValueError):
     client gets a 400 with the template's message instead of a dropped connection (#365)."""
 
 
-class ChatTemplate:
-    """The model's chat template, rendered with the same Jinja settings as transformers' apply_chat_template."""
+# Mistral Small 4's pre-tokenizers (tools/strata_tokenizer.py ARCH_PRE["mistral4"]): a pack with one of them is a
+# mistral4 model, the only one that uses them here
+MISTRAL_PRE = ("tekken", "pixtral")
 
-    def __init__(self, path: str | Path):
+
+class ChatTemplate:
+    """The model's chat template, rendered with the same Jinja settings as transformers' apply_chat_template.
+
+    `date_helper`: the template gets `strftime_now(format)`, today's local date and time as transformers gives it.
+    Mistral Small 4's template calls it.  Only Mistral packs get it (server.load_chat_template()): other templates
+    may test `strftime_now is defined`, and their prompts stay as they were."""
+
+    def __init__(self, path: str | Path, date_helper: bool = False):
         def raise_exception(message):
             raise TemplateRequestError(message)
 
@@ -52,6 +62,8 @@ class ChatTemplate:
         env.filters["tojson"] = tojson
         env.filters["from_json"] = json.loads           # DeepSeek V4's template reads a call's arguments with it
         env.globals["raise_exception"] = raise_exception
+        if date_helper:
+            env.globals["strftime_now"] = lambda fmt: datetime.datetime.now().strftime(fmt)
         self.source = Path(path).read_text(encoding="utf-8")
         # transformers' {% generation %} (LFM2's template) marks the assistant's text for training; here it is a
         # block that always renders
@@ -1194,8 +1206,11 @@ class OutputParser:
         # is opened by the prompt and ends with </think>.  `opened`: this prompt ended on Gemma's opening (its
         # template writes it after a tool's answer), so the reply starts inside the reasoning.  GLM's calls come
         # with <think> either way: GLM's template opens it in the prompt (`opened`), Flint writes it itself.
+        # Mistral Small 4 opens its reasoning itself with [THINK] and ends it with [/THINK]; its tool calls are not
+        # read here (Petit Chonk P3: out of scope), so a call arrives as text
         self.think_open, self.think_end = ("<|channel>thought\n", "<channel|>") if call_format == "gemma" \
-            else ("<think>", THINK_END) if call_format == "glm" else ("", THINK_END)
+            else ("<think>", THINK_END) if call_format == "glm" \
+            else ("[THINK]", "[/THINK]") if call_format == "mistral" else ("", THINK_END)
         # #537 tells a quoted </think> by the line break the end has after it.  GLM's and Gemma's answers follow
         # their end tag at once ('say "Paris."</think>Paris'), so there every end tag ends the reasoning
         self.quotes_end = call_format == "function"

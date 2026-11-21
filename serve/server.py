@@ -59,7 +59,7 @@ from urllib.parse import parse_qs, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))   # run as a script (run-<model>.bat) as well as a module
-from serve.frontend import (THINK_END, ChatTemplate, Event, OutputParser, anthropic_to_messages,  # noqa: E402
+from serve.frontend import (MISTRAL_PRE, THINK_END, ChatTemplate, Event, OutputParser, anthropic_to_messages,  # noqa: E402
                             forced_call, gemma_model_turn, images_of, literal_tags, mark_think_literals,
                             openai_to_messages, tool_choice_of, unmark_think_literals)
 from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
@@ -152,7 +152,10 @@ VISION_START = "<|vision_start|>"
 # ends the first turn: the system prompt with the tools, which "warm_start" keeps.
 TURN_OPENERS = {"function": ("<|im_start|>",), "gemma": ("<|turn>",),
                 "glm": ("<|system|>", "<|developer|>", "<|user|>", "<|assistant|>", "<|observation|>"),
-                "dsml": ("<｜User｜>", "<｜Assistant｜>"), "lfm2": ("<|im_start|>",)}
+                "dsml": ("<｜User｜>", "<｜Assistant｜>"), "lfm2": ("<|im_start|>",),
+                # Mistral Small 4: none, as before Petit Chonk P3 (its pack fell into "function", whose opener is no
+                # single Tekken token)
+                "mistral": ()}
 WARM_MIN_TOKENS = 2048           # a shorter prompt start is quick to read again: not kept
 # #606: a reply that repeats one token this many times in a row is ended there ("length"): a model in a loop, or a
 # broken state that answers one token forever (an issue saw 36,689 tokens of "!"). The config's "repeat_stop_tokens"
@@ -3406,7 +3409,8 @@ class Service:
         # how the model writes a tool call (serve/frontend.py's OutputParser)
         pre = getattr(tokenizer, "pre", "")
         self.call_format = "glm" if pre in ("glm4", "glm5", "flint") else "gemma" if pre == "gemma4" else \
-            "dsml" if pre in ("joyai-llm", "deepseek-v3") else "lfm2" if pre == "lfm2" else "function"
+            "dsml" if pre in ("joyai-llm", "deepseek-v3") else "lfm2" if pre == "lfm2" else \
+            "mistral" if pre in MISTRAL_PRE else "function"
         self.turn_ids = frozenset(t[0] for t in (tokenizer.encode(s, parse_special=True)
                                                  for s in TURN_OPENERS[self.call_format]) if len(t) == 1)
         self.engine.turn_ids = self.turn_ids            # the GEN line's turn_at (StrataEngine.turn_key)
@@ -3628,7 +3632,7 @@ class Service:
         if tok is None:
             raise ValueError(f"{target['id']} cannot be loaded: its tokenizer is missing ({tpath})")
         tpl = tpath / "chat_template.jinja"
-        return cfg, settings, tok, ChatTemplate(tpl if tpl.exists() else ROOT / "serve/chat_template.jinja")
+        return cfg, settings, tok, load_chat_template(tpl if tpl.exists() else ROOT / "serve/chat_template.jinja", tok)
 
     def _switch_to(self, target: dict) -> None:
         """The switch, run by the gate (serve/model_gate.py) while no request runs.  One model is in memory at a time:
@@ -4499,6 +4503,12 @@ class Service:
                   "enable_thinking": not off}
         if self.call_format in ("gemma", "dsml") and tools:   # their templates read a tool as OpenAI sends it
             tools = [{"type": "function", "function": t} for t in tools]
+        if self.call_format == "mistral":
+            # Mistral Small 4's template takes two efforts and raises on any other: every level of thinking a client
+            # asks for is "high"; no thinking, or none asked for, is "none" (the template's own default).  Its effort
+            # is written at the prompt's start ([MODEL_SETTINGS]), so effort_end's split below does not apply.
+            kwargs["reasoning_effort"] = "none" if off or effort in (None, "", "none") else "high"
+            return self.template.render(messages, tools=tools, **kwargs)
         if not self.effort_end or (not off and effort in (None, "", "xhigh", "high")):
             prompt = self.template.render(messages, tools=tools, **kwargs)
             if self.call_format == "gemma":
@@ -7595,6 +7605,13 @@ def load_tokenizer(tpath: Path):
     return ST.Tokenizer.from_dir(tpath)
 
 
+def load_chat_template(path: Path, tok) -> ChatTemplate:
+    """The chat template at `path` for a model with tokenizer `tok`.  A Mistral Small 4 pack (its pre-tokenizer is
+    Tekken's) gets the template helper strftime_now (Petit Chonk P3, TK5); every other model's template is loaded as
+    before, without it."""
+    return ChatTemplate(path, date_helper=getattr(tok, "pre", "") in MISTRAL_PRE)
+
+
 def engine_exe(cfg: dict) -> str:
     """The config's engine as an absolute path.  A relative "exe" is the config's cwd's: Windows' CreateProcess resolves
     "engine/strata.exe" against nothing it is told about (WinError 2)."""
@@ -7881,7 +7898,7 @@ def main() -> int:
             "Thinking about it.</think>\n\nHello from the mock engine."]), None, {}
     # the model's own chat template (exported with its tokenizer), else the original model's
     tpl = tpath / "chat_template.jinja"
-    svc = Service(engine, tok, ChatTemplate(tpl if tpl.exists() else ROOT / "serve/chat_template.jinja"),
+    svc = Service(engine, tok, load_chat_template(tpl if tpl.exists() else ROOT / "serve/chat_template.jinja", tok),
                   model_name=default_model_name(cfg), vision=vision,
                   sampling_defaults=sampling_defaults)
     svc.overrides, svc.cfg_overrides = overrides, cfg_overrides
