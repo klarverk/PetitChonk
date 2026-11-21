@@ -32,6 +32,18 @@ machine they ran on. [SOURCES.md](SOURCES.md) lists each file's original with bo
   - `p4_qual.py` and `p4_qual_runs.py` qualify the harness on items outside the benchmark. `p5_runs.py` runs the
     benchmark steps in order.
   - `test/test_p4_cand.py` tests the port's scorer against a stub engine, with no model needed.
+- **`speed/`: the speed measurements** (the README's speed figures).
+  - `p4b.py` runs them:
+    - `text` builds the prompts from the benchmark's WikiText windows;
+    - `b4port` times the port on its default user path, the run config setup writes, through the server's
+      protocol, a cold request and three warm ones;
+    - `b4llama` times `llama-bench` at the same points;
+    - `b5` times longer contexts;
+    - `b6` and `parity` emulate a PC with less RAM.
+
+    Every run records the machine's state, VRAM and available RAM each second, and the drive's reads.
+  - `ballast.py` locks a given amount of RAM until told to release it. It is the less-RAM emulation, and needs no
+    administrator rights.
 
 ## Setting up
 
@@ -53,6 +65,9 @@ machine they ran on. [SOURCES.md](SOURCES.md) lists each file's original with bo
 - **`p5_runs.py`** checks a manifest of the frozen benchmark inputs before it runs. The one built in is Petit Chonk
   1.0.0's, which lists that machine's folders. For your own run, build the inputs with `freeze_a.py`, write a
   manifest of them, and set `PETITCHONK_P4A_MANIFEST_SHA256`.
+- **`speed/p4b.py`** reads setup's run config for the model: `PETITCHONK_RUN_CONFIG`, by default
+  `cc\strata-mistral4-ud-q4_k_m.json` in the work folder. It refuses an engine other than the 1.0.0 release's
+  unless `PETITCHONK_ENGINE_SHA256` names it.
 
 Each script's own docstring gives its usage and exactly what it checks.
 

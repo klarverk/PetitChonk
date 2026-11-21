@@ -34,3 +34,5 @@ gives other bytes; `git show HEAD:<path> | sha256sum` gives the stored ones.
 | `bench/p5_runs.py` | `scripts/pub/p5/p5_runs.py` | `27560ebec435d642…` | `2d46f77ddffad35f…` | 4 |
 | `bench/test/stub_engine.py` | `scripts/pub/p4/test/stub_engine.py` | `cda338a2fab86412…` | `cda338a2fab86412…` | 0 |
 | `bench/test/test_p4_cand.py` | `scripts/pub/p4/test/test_p4_cand.py` | `e962ac207d214c75…` | `e962ac207d214c75…` | 0 |
+| `speed/p4b.py` | `scripts/pub/p4b/p4b.py` | `cbcf6c6a00510be3…` | `7273f6d6ba16767c…` | 5 |
+| `speed/ballast.py` | `scripts/pub/p4b/ballast.py` | `ef7740b9fde17dcd…` | `ef7740b9fde17dcd…` | 0 |
