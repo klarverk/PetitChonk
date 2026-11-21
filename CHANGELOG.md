@@ -29,6 +29,9 @@ Planned as 1.0.0, the first release. Upstream base: PolyStrata
 - Chat serving for Mistral Small 4. Its chat template gets the `strftime_now` date helper; its reasoning
   (`[THINK]`…`[/THINK]`) is returned apart from the answer; and a request's reasoning effort maps to the two its
   template takes: `none`, or `high` for any level of thinking. Other models' prompts and parsing are unchanged.
+- Setup installs Mistral Small 4 (`--family mistral4`): Unsloth's UD-Q4_K_M, pinned and checked by SHA-256. Its run
+  config takes one token a step (`--lookup 0 --window 1`) and recommends a 16K context, the longest its parity with
+  llama.cpp was verified at; longer contexts are offered as not verified. Setup offers it on NVIDIA cards only.
 - `strata-poly` options `--tokens-file` and `--follow-file`: the ids of `--tokens` and `--follow`, read from a
   file.
 - An opt-in logits dump for verification runs (`STRATA_LOGITS_DIR`). It is off unless the variable is set.

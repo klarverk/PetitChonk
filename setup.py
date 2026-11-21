@@ -95,6 +95,7 @@ HF_REVISIONS = {
     "Diffuspace/Clover-35B-A3B-Preview": "4b0402b65e523d0183a14c431955438714cb16ff",                     # 2026-10-28
     "unsloth/Ornith-1.5-122B-GGUF": "3842d003341507c216295c6f28dfcd30349925c6",                          # 2026-10-20
     "ornith-ai/Ornith-1.5-122B": "dfa07bab90e90746ffbfc0b0cba3126eb9265de2",                              # 2026-10-20
+    "unsloth/Mistral-Small-4-119B-2603-GGUF": "bd93c721735aa32c035c0f19e738cb3371fd56ff",                # 2026-11-16
 }
 
 
@@ -863,6 +864,30 @@ FAMILIES = {
                              (32785752352, "43bdc1b0cb764b5531d320816fb6004245256a414bfd55f1fdb69e3db42eaa57"),
                              "mmproj-F16.gguf":
                              (908724544, "39db176176a904b101f5173a4f03e785990f9279f94ab373c4fd629ae7011817")}},
+    # Mistral Small 4 (GGUF architecture mistral4, Petit Chonk's backend in src/poly/mistral4.cpp), text only, from
+    # Unsloth's split GGUF.  Its parity with llama.cpp was verified on an RTX 5080 (16 GB) beside 128 GB of RAM, one
+    # token a step and up to a 16K context, so its run config is that: "engine_args" are options every config of the
+    # family gets (no guesses ahead), "context" the one recommended, and the menu marks the ones past
+    # "verified_context" as not verified.  "arena_gb" is the routed experts in the file; "vram_beside_gb" was
+    # measured on that card at 32K, and "ram_gb" is poly_ram_need() there.  "row_bytes": one FP16 row of 320 values a
+    # layer, 36 layers (the compressed latent and the rotated key; no value cache of its own).
+    "mistral4": {"title": "Mistral Small 4", "by": "Mistral AI; quantized by Unsloth",
+                 "about": "on the strata-poly engine (Petit Chonk's Mistral backend): one NVIDIA card, tested on "
+                          "Windows only; a 74 GB download, ~70 GB of RAM beside a 16 GB card; text only",
+                 "hf": hf("unsloth/Mistral-Small-4-119B-2603-GGUF"),
+                 "file": "Mistral-Small-4-119B-2603-{q}-0000{i}-of-00003.gguf", "shards": 3, "tag": "mistral4-",
+                 "name": "mistral-small-4-119b-2603", "engine": "poly", "vision": False, "windows": True,
+                 "ran_on_gb": 16, "row_bytes": 23040, "engine_args": ["--lookup", "0", "--window", "1"],
+                 "context": 16384, "verified_context": 16384, "cuda_only": True,
+                 "models": {"UD-Q4_K_M": {"about": "4-bit experts (Unsloth Dynamic), 5- and 6-bit in some layers",
+                                          "download_gb": 73.8, "ram_gb": 70, "arena_gb": 70.6, "vram_beside_gb": 5.8,
+                                          "file": "UD-Q4_K_M/Mistral-Small-4-119B-2603-UD-Q4_K_M-0000{i}-of-00003.gguf"}},
+                 "sha256": {"Mistral-Small-4-119B-2603-UD-Q4_K_M-00001-of-00003.gguf":
+                            (7875616, "fd3cc46082e4e64eb623eea4611b02583d1de4c20a59411bf1820925d5117dfe"),
+                            "Mistral-Small-4-119B-2603-UD-Q4_K_M-00002-of-00003.gguf":
+                            (49299298464, "f357d8dc029824fa4515ae60d7a8b7e108546763614f16c00a1b4ea0cd94145c"),
+                            "Mistral-Small-4-119B-2603-UD-Q4_K_M-00003-of-00003.gguf":
+                            (24456006464, "9dc960d67fb1ef23029d24878b4cf6c63b743ab26cf9137402549591bd770c50")}},
 }
 MMPROJ = "mmproj-Qwen3.8-Flash-Next-BF16.gguf"
 # Qwen3.6-35B-A3B (GGUF architecture qwen35moe), Unsloth's GGUFs with the MTP block: a family with an engine path of its
@@ -2391,7 +2416,8 @@ def verify_sha256(s: Path, size: int, sha: str, own: bool = False) -> None:
 # general.architecture of each strata-poly family's GGUFs, the name Engine::open() (src/poly/engine.cpp) picks its
 # code by; the families not listed are qwen35moe
 POLY_GGUF_ARCHS = {"glm": ("glm5-next", "glm5next"), "deepseek": ("deepseek4",), "lfm25": ("lfm2moe",),
-                   "gemma4": ("gemma4",), "flint": ("flint",), "kolibri": ("kolibri1",), "clover": ("clover_moe",)}
+                   "gemma4": ("gemma4",), "flint": ("flint",), "kolibri": ("kolibri1",), "clover": ("clover_moe",),
+                   "mistral4": ("mistral4",)}
 
 
 def gguf_arch(s: Path) -> str:
@@ -3027,8 +3053,9 @@ def unsloth_default_env(family: str, model: str, hip: bool, in_budget: bool) -> 
 
 def menu_families(hip: bool) -> list:
     """The families the model menu lists, in menu order.  The NVFP4 packs run on NVIDIA cards only (the AMD and Intel
-    engines have no NVFP4 kernels), so on those the menu does not offer them; `--family nvfp4` still says why not."""
-    return [f for f in FAMILIES if not (hip and FAMILIES[f].get("ready"))]
+    engines have no NVFP4 kernels), so on those the menu does not offer them; `--family nvfp4` still says why not.
+    A "cuda_only" family (mistral4) is left out there too: it is supported and tested on NVIDIA cards only."""
+    return [f for f in FAMILIES if not (hip and (FAMILIES[f].get("ready") or FAMILIES[f].get("cuda_only")))]
 
 
 def nvfp4_card_note(gpu) -> str:
@@ -6904,6 +6931,9 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
     _sg = getattr(a, "_custom_gguf_shards", None)
     fam = FAMILIES[family]
     title = fam["title"]
+    if hip and fam.get("cuda_only"):
+        fail(f"{title} is supported and tested on NVIDIA cards (CUDA) only: its engine for AMD and Intel cards is "
+             "neither built nor tested", "use an NVIDIA card; sponsorship for other cards is welcome (README)")
     if hip and WIN:   # the engine is compiled here from AMD's ROCm Windows wheels (rocm_win_root)
         warn(f"{title} on AMD cards on Windows: EXPERIMENTAL.  Setup compiles the HIP engine here (AMD's ROCm "
              "wheels), which has run Tiel Coder on an RX 9070 XT and Qwen3.6, Ornith, Tiel Coder and Gemma 4 on an "
@@ -7021,13 +7051,20 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         # writing after a prompt that fills the context, tokens/s, on the 8 GB laptop (docs/BACKENDS.md, docs/LFM.md)
         laptop = fam.get("laptop_tps") or ({32768: "52-58", 65536: "42-46", 131072: "28-30"}
                                            if fam.get("ran_on_gb") == 8 else {})
-        for i, c in enumerate(POLY_CONTEXTS, 1):
+        # 32K is recommended, or a family's own "context" (mistral4: 16K), which then joins the menu; the contexts
+        # past a family's "verified_context" say so
+        base = fam.get("context", 32768)
+        menu = sorted({*POLY_CONTEXTS, base})
+        checked = fam.get("verified_context")
+        for i, c in enumerate(menu, 1):
             on8 = f"; 8 GB card: {laptop[c]} tokens/s after a full prompt" if c in laptop else ""
-            note = f"   (recommended{on8})" if c == 32768 else \
-                f"   ({(c - 32768) * row / 1e9:.1f} GB more VRAM{on8 or '; no long prompt run'})" if c > 32768 else ""
+            past = "; not verified for this model" if checked and c > checked else ""
+            note = f"   (recommended{on8})" if c == base else \
+                f"   ({(c - base) * row / 1e9:.1f} GB more VRAM{on8 or past or '; no long prompt run'})" if c > base \
+                else ""
             say(f"  {i}) {c // 1024}K tokens{note}")
-        ctx = POLY_CONTEXTS[int(ask("Context?", [str(i) for i in range(1, len(POLY_CONTEXTS) + 1)],
-                                   str(POLY_CONTEXTS.index(32768) + 1), a.yes)) - 1]
+        ctx = menu[int(ask("Context?", [str(i) for i in range(1, len(menu) + 1)], str(menu.index(base) + 1),
+                           a.yes)) - 1]
     ok(f"context: {ctx} tokens")
 
     # the conversation cache: asked once, then kept as the model's run config has it
@@ -7206,6 +7243,9 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
            "that much less)")
     if fam.get("tail_skip"):
         args += ["--tail-skip", str(fam["tail_skip"])]
+    if fam.get("engine_args"):                         # mistral4: one token a step, as its parity was verified
+        args += fam["engine_args"]
+        ok("engine options for this model: " + " ".join(fam["engine_args"]))
     if kv:
         args += ["--kv", kv]
         ok(f"attention caches stored as {kv} (--kv in the config, docs/Q8_KV.md; --kv fp16 at setup takes it out)")

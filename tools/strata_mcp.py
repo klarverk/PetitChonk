@@ -221,6 +221,12 @@ FALLBACK_FAMILIES = {
                                             "download_gb": 79.7, "ram_gb": 66, "arena_gb": 73.0},
                              "Q8_0": {"about": "8-bit throughout: the closest to the model as trained",
                                       "download_gb": 132.6, "ram_gb": 119, "arena_gb": 125.8}}},
+    "mistral4": {"title": "Mistral Small 4",
+                 "about": "on the strata-poly engine (Petit Chonk's Mistral backend): one NVIDIA card, tested on "
+                          "Windows only; a 74 GB download, ~70 GB of RAM beside a 16 GB card; text only",
+                 "tag": "mistral4-", "engine": "poly", "vision": False,
+                 "models": {"UD-Q4_K_M": {"about": "4-bit experts (Unsloth Dynamic), 5- and 6-bit in some layers",
+                                          "download_gb": 73.8, "ram_gb": 70, "arena_gb": 70.6}}},
 }
 FALLBACK_CONTEXTS = [8192, 32768, 65536, 131072, 204800, 262144, 393216, 524288]
 BENCH_PROMPT = ("Write a short story (about 300 words) about a lighthouse keeper who finds a message in a bottle. "

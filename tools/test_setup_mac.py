@@ -280,7 +280,9 @@ class Source(unittest.TestCase):
 class SmallerModelCatalog(unittest.TestCase):
     def test_uses_shared_family_sizes_and_filenames(self):
         catalog = M.smaller_model_catalog()
-        self.assertEqual(set(catalog), {f for f,d in setup.FAMILIES.items() if d.get("engine")=="poly"})
+        # a "cuda_only" family (mistral4) is not offered on a Mac
+        self.assertEqual(set(catalog), {f for f,d in setup.FAMILIES.items()
+                                        if d.get("engine")=="poly" and not d.get("cuda_only")})
         for family, entry in catalog.items():
             self.assertTrue(entry["metal_ready"])
             self.assertFalse(entry["model_validated"])
