@@ -116,6 +116,7 @@ lm-evaluation-harness's formats at `v0.4.13`):
 - McNemar's test on the items where they differ: p = 1.0 for every task and pooled.
 - ARC's length-normalized accuracy is 65.3% for both.
 - These are parity measures: they show the two engines score the model the same way, not how good the model is.
+- The datasets and their licences are listed in [`tools/mistral4/README.md`](../tools/mistral4/README.md#data-and-licences).
 
 ## Speed
 

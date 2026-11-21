@@ -45,6 +45,21 @@ machine they ran on. [SOURCES.md](SOURCES.md) lists each file's original with bo
   - `ballast.py` locks a given amount of RAM until told to release it. It is the less-RAM emulation, and needs no
     administrator rights.
 
+## Data and licences
+
+The benchmarks use these datasets. They are fetched at pinned revisions by `fetch_sources.py`, not stored in this
+repository, and keep their own licences:
+
+| Benchmark | Dataset (Hugging Face) | Licence |
+|---|---|---|
+| Perplexity | `Salesforce/wikitext`, `wikitext-2-raw-v1`, test split | CC BY-SA 3.0 and GFDL |
+| ARC-Challenge | `allenai/ai2_arc`, `ARC-Challenge`, test split | CC BY-SA 4.0 |
+| CommonsenseQA | `tau/commonsense_qa`, validation split | MIT (the authors' statement) |
+| MMLU | `cais/mmlu`, `all`, test split | MIT |
+
+The prompt formats are those of [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)
+`v0.4.13` (MIT), whose task files `fetch_mmlu_yaml.py` fetches.
+
 ## Setting up
 
 - **Windows, an NVIDIA card, CUDA 13.0.** Never use CUDA 13.2.x: its compiler gives wrong results on RTX 50 cards.
