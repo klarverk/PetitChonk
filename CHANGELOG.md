@@ -5,7 +5,7 @@ All notable changes to Petit Chonk are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Petit Chonk's version numbers are its own. They are independent of PolyStrata's and Strata's, and of the engine
+Petit Chonk's version numbers are its own. They are independent of PolyStrata's and the Strata project's, and of the engine
 version that `strata-poly` reports. Each release names the PolyStrata commit it is built on. The public interface
 that the version numbers describe is:
 - the installer's command-line options;
@@ -42,8 +42,9 @@ Planned as 1.0.0, the first release. Upstream base: PolyStrata
 - The name in the web app and the window titles: PolyStrata becomes Petit Chonk.
 - Setup downloads its ready-made `strata-poly` engine from Petit Chonk's releases. A checkout with no matching
   release asset compiles the engine, as before.
-- The README describes the fork and credits PolyStrata, Strata, llama.cpp, Mistral AI and Unsloth.
-- `LICENSE` adds Petit Chonk's copyright line beside Strata's and PolyStrata's.
+- The README describes the fork and credits PolyStrata, [Strata](https://github.com/Niko1221/Strata), llama.cpp,
+  Mistral AI and Unsloth.
+- `LICENSE` adds Petit Chonk's copyright line beside the Strata project's and PolyStrata's.
 - `SECURITY.md` sends vulnerability reports to this repository.
 
 [Unreleased]: https://github.com/klarverk/PetitChonk/compare/3e1642161198c50ff1abed4046f4e4f476099dbb...main
