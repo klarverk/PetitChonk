@@ -921,9 +921,10 @@ VEXE = "strata-vision.exe" if WIN else "strata-vision"
 POLY_EXE = "strata-poly.exe" if WIN else "strata-poly"
 # The ready-made one (tools/make_poly_release.py): an asset named after the source_hash() of the engine and the
 # encoder in it (poly_asset()), so a checkout finds the build of its own source or none.  STRATA_POLY_PREBUILT_URL:
-# another folder, a local one too.
+# another folder, a local one too.  Petit Chonk publishes its own (its engine has the Mistral Small 4 backend, so
+# upstream's assets never match its source); a checkout with no matching asset compiles, as before.
 POLY_PREBUILT_URL = os.environ.get("STRATA_POLY_PREBUILT_URL",
-                                   "https://github.com/VecSzn/PolyStrata/releases/latest/download/")
+                                   "https://github.com/klarverk/PetitChonk/releases/latest/download/")
 POLY_ASSET = "strata-poly-windows-x64-{src}.zip"
 # A model of strata-poly that reads pictures has its image encoder on the GPU from this much VRAM (GiB), and on the
 # CPU below it: the encoder holds 1.6 to 2.4 GB there, which a smaller card needs for the model
