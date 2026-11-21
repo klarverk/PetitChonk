@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/media/Petit_Chonk_Icon_Dark.svg">
+    <img src="docs/media/Petit_Chonk_Icon_Light.svg" width="96" height="96" alt="">
+  </picture>
+</p>
+
 <h1 align="center">Petit Chonk</h1>
 
 <p align="center"><b>Mistral Small 4 on one 16 GB graphics card and system RAM</b><br>
@@ -113,6 +120,9 @@ llama.cpp is `llama-bench` with the experts of the first four layers on the card
 
 - **The first request after a start is slower,** while the expert cache fills. With a 16,000-token prompt it read
   68 tokens/s and wrote 16.6.
+- **What limits writing on this PC is its RAM:** DDR4-3200, about 36 GB/s measured. In one measurement, about
+  three quarters of each token's time went to reading the experts that are not on the card from RAM, at close to
+  that limit. Faster memory such as DDR5 should write faster (not measured).
 - **Longer contexts** (they run; outputs not checked): a 32,512-token prompt was read in 2.9 minutes and then
   13.3 tokens/s written. A 65,280-token prompt took 12.5 minutes, then 12.6 tokens/s.
 - **With 64 GB of RAM** (emulated by locking 64 GiB on the same PC): about 4 tokens/s written, and prompts read at
