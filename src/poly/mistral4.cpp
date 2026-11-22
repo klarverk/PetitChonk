@@ -84,6 +84,10 @@ void Mistral4::load_geometry() {
     const MetaValue* norm = find("expert_weights_norm");
     w_norm_ = norm && norm->u != 0;
     w_scale_ = num("expert_weights_scale", 0.f);
+    // --cache-bias (exploration): moe() then weighs the picks as a softmax of their unbiased scores, which is
+    // route()'s own weighting only when the four are renormalized and not scaled
+    if (opt_.cache_bias > 0.f && (!w_norm_ || (w_scale_ != 0.f && w_scale_ != 1.f)))
+        throw std::runtime_error("mistral4: --cache-bias needs expert_weights_norm and an expert_weights_scale of 1");
 
     // YaRN, as llama-context.cpp and deepseek2.cpp take it.  The converter stores 0.1 * mscale_all_dim as the log
     // multiplier, and the reference divides it back (deepseek2.cpp:34-37).  The context's attn_factor cancels the

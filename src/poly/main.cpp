@@ -1499,7 +1499,7 @@ void usage() {
                  "                         little (default 0 = none is; setup gives Qwen3.6 6)\n"
                  "  --skip-weight F        in place of --tail-skip: an expert outside VRAM that every token of a\n"
                  "                         window weighs under F of its experts' weight is left out (default 0 = off)\n"
-                 "  --cache-bias F         qwen35moe: a token's router scores get F added for each expert in VRAM\n"
+                 "  --cache-bias F         qwen35moe, mistral4: a token's router scores get F added for each expert in VRAM\n"
                  "                         before it picks, as it comes a few at a time; the weights stay the\n"
                  "                         router's own: fewer experts on the CPU, and the answers move (default 0\n"
                  "                         = off)\n"

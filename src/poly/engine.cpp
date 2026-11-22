@@ -1660,8 +1660,9 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
     if (name != "gemma4" && (o.kv_format == KvFmt::kInt8 || o.kv_format == KvFmt::kInt8K))
         throw std::runtime_error("--kv int8 and --kv int8k are Gemma 4's; for a qwen35moe or kolibri1 model use "
                                  "--kv q8_0 (this is a '" + name + "' model)");
-    // moe() weighs the picks as a softmax of their scores, which is how only this architecture's router does
-    if (o.cache_bias > 0.f && !qwen35)
+    // moe() weighs the picks as a softmax of their scores, which is how this architecture's router does, and
+    // mistral4's when its four are renormalized (Mistral4 checks it)
+    if (o.cache_bias > 0.f && !qwen35 && name != "mistral4")
         throw std::runtime_error("--cache-bias is supported for qwen35moe models; this is a '" + name + "' model");
     const auto make = [&]() -> std::unique_ptr<Engine> {
         if (name == "glm5-next" || name == "glm5next") return std::make_unique<Glm5Next>();   // Unsloth: no hyphen
