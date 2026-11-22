@@ -1,7 +1,8 @@
 """Tests for setup.py's Mistral Small 4 (Petit Chonk's mistral4 backend): its pinned files, the estimates for the
-16 GB card it was measured on, the install by strata-poly's steps, and the two choices of its run config that are
-its own - no guesses ahead (--lookup 0 --window 1) and 16K recommended, the longest context its parity was
-verified at.  Mocked like tools/test_setup_glm.py, whose harness this uses.
+16 GB card it was measured on, the install by strata-poly's steps, and the choices of its run config that are its
+own - no guesses ahead (--lookup 0 --window 1), 16K recommended, the longest context its parity was verified at, and
+the cache bias (--cache-bias: off by default, 0.25 or 0.5; Petit Chonk 1.1.0).  Mocked like tools/test_setup_glm.py,
+whose harness this uses.
 
     python -m unittest tools.test_setup_mistral4
 """
@@ -65,8 +66,14 @@ class OtherFamilies(unittest.TestCase):
     def test_no_other_family_has_mistral4_s_own_choices(self):
         for f, fam in setup.FAMILIES.items():
             if f != "mistral4":
-                for key in ("engine_args", "context", "verified_context", "cuda_only"):
+                for key in ("engine_args", "context", "verified_context", "cuda_only", "cache_bias"):
                     self.assertNotIn(key, fam, f)
+        for f, fam in setup.OWN_PATH_FAMILIES.items():
+            self.assertNotIn("cache_bias", fam, f)
+
+    def test_the_cache_bias_values_offered(self):
+        # off (the default) and the two values measured on 22 Nov 2026 (decisions D-11-1, D-11-2)
+        self.assertEqual(list(FAM["cache_bias"]), ["0.25", "0.5"])
 
 
 class Platforms(unittest.TestCase):
@@ -113,8 +120,9 @@ class Main(unittest.TestCase):
         self.assertEqual(args[args.index("--max-context") + 1], "16384")      # --yes takes the recommended one
         self.assertEqual((args.count("--lookup"), args[args.index("--lookup") + 1]), (1, "0"))
         self.assertEqual((args.count("--window"), args[args.index("--window") + 1]), (1, "1"))
-        for flag in ("--prompt-batch", "--draft-model", "--tail-skip", "--kv"):
+        for flag in ("--prompt-batch", "--draft-model", "--tail-skip", "--kv", "--cache-bias"):
             self.assertNotIn(flag, args)
+        self.assertIn("cache bias: off", out)                                  # --yes: the cache bias is off
         self.assertEqual(cfg["model_name"], "mistral-small-4-119b-2603-ud-q4_k_m")
         self.assertEqual(cfg["display_name"], "Mistral Small 4 UD-Q4_K_M")
         self.assertNotIn("vision", cfg)
@@ -148,10 +156,73 @@ class Main(unittest.TestCase):
         self.assertIn("2) 32K tokens   (recommended; 8 GB card: 69-74 tokens/s after a full prompt)", out)
         self.assertNotIn("16K tokens", out)
         self.assertNotIn("not verified", out)
+        self.assertFalse([q for q in self.asked if "Cache bias" in q], self.asked)   # not asked
+        self.assertNotIn("Cache bias", out)
         args = json.loads((self.t / "strata-lfm25-ud-q4_k_xl.json").read_text())["args"]
         self.assertEqual(args[args.index("--max-context") + 1], "32768")
-        for flag in ("--lookup", "--window"):
+        for flag in ("--lookup", "--window", "--cache-bias"):
             self.assertNotIn(flag, args)
+
+    # The cache bias (Petit Chonk 1.1.0; the engine's --cache-bias, src/poly/mistral4.cpp): off by default, 0.25 or
+    # 0.5 when chosen, and then in the run config the server starts the engine with.
+
+    def args(self):
+        return self.config()["args"]
+
+    def test_the_cache_bias_question(self):
+        code, out, _ = self.main(family="mistral4", ram=127.9, vram=RTX_5080, answers={})
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len([q for q in self.asked if q.startswith("Cache bias?")]), 1, self.asked)
+        self.assertIn("Cache bias? [1]: ", self.asked)                        # off is the answer Enter takes
+        for line in ("1) off    (recommended: the model's own pick, with which its accuracy was verified)",
+                     "2) 0.25   (faster writing; no quality loss seen in a short test)",
+                     "3) 0.5    (faster still; a small quality loss seen in a short test)"):
+            self.assertIn(line, out)
+        self.assertIn("docs/MISTRAL4.md", out)
+        self.assertNotIn("--cache-bias", self.args())
+        self.assertIn("cache bias: off", out)
+
+    def test_a_cache_bias_chosen_is_written(self):
+        for argv, answers, want in ((["--cache-bias", "0.5"], None, "0.5"), (["--cache-bias", "0.25"], None, "0.25"),
+                                    ((), {"Cache bias?": "2"}, "0.25"), ((), {"Cache bias?": "3"}, "0.5")):
+            with self.subTest(argv=argv, answers=answers):
+                self.downloads, self.runs, self.verified = [], [], []
+                for c in self.t.glob("strata-mistral4-*.json*"):                 # a new install each time
+                    c.unlink()
+                code, out, _ = self.main(argv, family="mistral4", ram=127.9, vram=RTX_5080, answers=answers)
+                self.assertEqual(code, 0, out)
+                args = self.args()
+                self.assertEqual((args.count("--cache-bias"), args[args.index("--cache-bias") + 1]), (1, want))
+                self.assertEqual(args[args.index("--lookup") + 1], "0")         # the family's own options stay
+                self.assertEqual(args[args.index("--window") + 1], "1")
+                self.assertIn(f"cache bias: {want} (--cache-bias in the config", out)
+                if argv:                                                       # given: not asked
+                    self.assertNotIn("Cache bias:", out)
+
+    def test_the_earlier_choice_is_what_enter_and_yes_keep(self):
+        code, out, _ = self.main(["--cache-bias", "0.5"], family="mistral4", ram=127.9, vram=RTX_5080)
+        self.assertEqual(code, 0, out)
+        for answers in (None, {}):                                             # --yes, then Enter at the question
+            with self.subTest(answers=answers):
+                code, out, _ = self.main(family="mistral4", ram=127.9, vram=RTX_5080, answers=answers)
+                self.assertEqual(code, 0, out)
+                args = self.args()
+                self.assertEqual(args[args.index("--cache-bias") + 1], "0.5")
+                if answers is not None:
+                    self.assertIn("Cache bias? [3]: ", self.asked)
+        code, out, _ = self.main(["--cache-bias", "off"], family="mistral4", ram=127.9, vram=RTX_5080)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("--cache-bias", self.args())                           # turned off again
+        code, out, _ = self.main(family="mistral4", ram=127.9, vram=RTX_5080)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("--cache-bias", self.args())                           # and stays off
+
+    def test_another_family_is_told_it_has_no_cache_bias(self):
+        code, out, _ = self.main(["--cache-bias", "0.5"], family="lfm25", ram=32.0, vram=8.0)
+        self.assertEqual(code, 0, out)
+        self.assertIn("--cache-bias", next(line for line in out.splitlines() if "not used with" in line))
+        args = json.loads((self.t / "strata-lfm25-ud-q4_k_xl.json").read_text())["args"]
+        self.assertNotIn("--cache-bias", args)
 
 
 if __name__ == "__main__":

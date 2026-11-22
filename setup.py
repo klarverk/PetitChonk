@@ -870,7 +870,9 @@ FAMILIES = {
     # family gets (no guesses ahead), "context" the one recommended, and the menu marks the ones past
     # "verified_context" as not verified.  "arena_gb" is the routed experts in the file; "vram_beside_gb" was
     # measured on that card at 32K, and "ram_gb" is poly_ram_need() there.  "row_bytes": one FP16 row of 320 values a
-    # layer, 36 layers (the compressed latent and the rotated key; no value cache of its own).
+    # layer, 36 layers (the compressed latent and the rotated key; no value cache of its own).  "cache_bias": the
+    # values of --cache-bias setup offers beside off, the default (poly_cache_bias()), each with what a short test
+    # measured; docs/MISTRAL4.md has the measurements.
     "mistral4": {"title": "Mistral Small 4", "by": "Mistral AI; quantized by Unsloth",
                  "about": "on the strata-poly engine (Petit Chonk's Mistral backend): one NVIDIA card, tested on "
                           "Windows only; a 74 GB download, ~70 GB of RAM beside a 16 GB card; text only",
@@ -879,6 +881,8 @@ FAMILIES = {
                  "name": "mistral-small-4-119b-2603", "engine": "poly", "vision": False, "windows": True,
                  "ran_on_gb": 16, "row_bytes": 23040, "engine_args": ["--lookup", "0", "--window", "1"],
                  "context": 16384, "verified_context": 16384, "cuda_only": True,
+                 "cache_bias": {"0.25": "faster writing; no quality loss seen in a short test",
+                                "0.5": "faster still; a small quality loss seen in a short test"},
                  "models": {"UD-Q4_K_M": {"about": "4-bit experts (Unsloth Dynamic), 5- and 6-bit in some layers",
                                           "download_gb": 73.8, "ram_gb": 70, "arena_gb": 70.6, "vram_beside_gb": 5.8,
                                           "file": "UD-Q4_K_M/Mistral-Small-4-119B-2603-UD-Q4_K_M-0000{i}-of-00003.gguf"}},
@@ -6588,6 +6592,53 @@ def poly_saved_conv(paths) -> int | str | None:
     return None
 
 
+def poly_saved_cache_bias(paths) -> str | None:
+    """--cache-bias of an earlier run config of this model (the first of `paths` there is): its value, "off" when that
+    config has none; None without an earlier config."""
+    for p in paths:
+        if p is None or not p.is_file():
+            continue
+        try:
+            args = json.loads(p.read_text(encoding="utf-8-sig")).get("args")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(args, list):
+            return flag_value(args, "--cache-bias") or "off"
+    return None
+
+
+def poly_cache_bias(a, fam: dict, saved_paths) -> str | None:
+    """The cache bias (Petit Chonk 1.1.0): while the model writes, a word's router scores get this much added for each
+    expert already in VRAM, so fewer are read from RAM; the weights of the experts picked stay the router's own.  A
+    family with "cache_bias" offers it (mistral4), off by default: off keeps the routing the model's accuracy was
+    verified with.  --cache-bias sets it; otherwise it is asked, Enter (and --yes) taking this model's earlier choice,
+    else off.  Returns the value for --cache-bias in the run config, or None (off, or a family without it)."""
+    offered = fam.get("cache_bias")
+    if not offered:
+        return None
+    choices = ["off", *offered]
+    value = getattr(a, "cache_bias", None)
+    if value is None:
+        saved = poly_saved_cache_bias(saved_paths)
+        keep = saved if saved in choices else "off"
+        say()
+        say("  Cache bias: for each word, the model picks 4 of its 128 experts in every layer. With the bias, an expert")
+        say("  already in VRAM counts a little more in that pick while it writes, so fewer are read from RAM: faster")
+        say("  writing, and text a little different from the model's own pick (docs/MISTRAL4.md has the measurements).")
+        say("  1) off    (recommended: the model's own pick, with which its accuracy was verified)")
+        for i, v in enumerate(offered, 2):
+            say(f"  {i}) {v:<6} ({offered[v]})")
+        value = choices[int(ask("Cache bias?", [str(i) for i in range(1, len(choices) + 1)],
+                                str(choices.index(keep) + 1), a.yes)) - 1]
+    elif value not in choices:
+        fail(f"--cache-bias {value}: {fam['title']} takes " + ", ".join(choices))
+    if value == "off":
+        ok("cache bias: off (the model's own pick of experts)")
+        return None
+    ok(f"cache bias: {value} (--cache-bias in the config: an expert in VRAM counts {value} more while the model writes)")
+    return value
+
+
 def poly_asset() -> str:
     """The ready-made strata-poly's asset for this checkout: the engine and the image encoder are both in it."""
     return POLY_ASSET.format(src=source_hash(ENGINE_SOURCES + VISION_SOURCES))
@@ -6955,6 +7006,7 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         ("--vision", not sees and a.vision not in (None, "no", "none")),
         ("--vision-tokens", not sees and a.vision_tokens is not None),
         ("--kv", a.kv and a.kv != "fp16" and family not in POLY_KV.get(a.kv, ())),
+        ("--cache-bias", a.cache_bias not in (None, "off") and not fam.get("cache_bias")),
         ("--kv-streaming", a.kv_streaming != "auto"), ("--rope-scaling", a.rope_scaling),
         ("--rope-scale", a.rope_scale is not None), ("--low-ram", a.low_ram != "auto"),
         ("--resident-budget-gib", a.resident_budget_gib is not None),
@@ -7088,6 +7140,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         ok(f"conversation cache: 40% of the RAM free once the model is loaded, up to {POLY_CONV_CACHE_MIB} MiB")
     else:
         ok("conversation cache: " + (f"up to {conv} MiB of RAM" if conv else "off (the last conversation is kept)"))
+    # the cache bias: only a family with "cache_bias" (mistral4) is asked, and only it can get --cache-bias
+    bias = poly_cache_bias(a, fam, [cfg_path, adopted if adopted is not None and adopted.name == cfg_path.name else None])
 
     # one file, or the numbered files of a split GGUF: the engine is given the first and finds the others by name
     models_dir = Path(a.gguf_dir) if a.gguf_dir else Path(a.models_dir) / tag
@@ -7246,6 +7300,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
     if fam.get("engine_args"):                         # mistral4: one token a step, as its parity was verified
         args += fam["engine_args"]
         ok("engine options for this model: " + " ".join(fam["engine_args"]))
+    if bias:                                           # poly_cache_bias(): a value the family offers, not off
+        args += ["--cache-bias", bias]
     if kv:
         args += ["--kv", kv]
         ok(f"attention caches stored as {kv} (--kv in the config, docs/Q8_KV.md; --kv fp16 at setup takes it out)")
@@ -7910,6 +7966,10 @@ def main() -> int:
                          "precise) or k8v4 (hybrid: INT8 K + 4-bit V, 816 B/cell). For a model of strata-poly "
                          "(docs/Q8_KV.md): q8_0 (half the KV cache's VRAM: Qwen3.6, Ornith, Tiel Coder, MiniCPM-V, "
                          "Kolibri, Flint, LFM2.5), int8 or int8k (Gemma 4), fp16 (the default)")
+    ap.add_argument("--cache-bias", choices=["off", "0.25", "0.5"],
+                    help="Mistral Small 4: while it writes, an expert already in VRAM counts this much more when a "
+                         "word picks its experts - faster writing, text a little different from the model's own pick "
+                         "(docs/MISTRAL4.md). off (the default), 0.25 or 0.5; remembered for this model")
     ap.add_argument("--vision", choices=["yes", "no", "none", "gpu", "cpu"],
                     help="let the model read images (yes = the encoder on the GPU)")
     ap.add_argument("--vision-tokens", type=int, metavar="N",
