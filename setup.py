@@ -6424,7 +6424,7 @@ def write_run_script(model, cfg_path, port, open_browser=True):
              "--port", str(port)] + (["--open"] if open_browser else [])
     if WIN:
         script = ROOT / f"run-{model.lower()}.bat"
-        script.write_text("@echo off\r\ntitle PolyStrata " + model + "\r\ncd /d \"" + str(ROOT) + "\"\r\n" +
+        script.write_text("@echo off\r\ntitle Petit Chonk " + model + "\r\ncd /d \"" + str(ROOT) + "\"\r\n" +
                           " ".join(f'"{x}"' for x in serve) + "\r\nif errorlevel 1 pause\r\n", encoding="utf-8")
     else:
         script = ROOT / f"run-{model.lower()}.sh"
@@ -7252,7 +7252,7 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         ok(f"vision encoder: {mmproj}")
     ok("model file present")
 
-    step(6, "preparing the model for PolyStrata")
+    step(6, "preparing the model for Petit Chonk")
     pack = find_in([data, *elsewhere], f"packs/{tag.lower()}") or data / "packs" / tag.lower()
     if not (pack / "tokenizer" / "vocab.json").exists():
         run([sys.executable, str(ROOT / "tools" / "strata_tokenizer.py"), "--gguf", str(gguf), "--out", str(pack)],
@@ -7730,7 +7730,7 @@ def install_own_path(a, family, gpu, hip, amd, cuda_tk, multi, port, ram, adopte
             verify_sha256(mmproj, *fam["sha256"][mmproj.name], own=bool(a.gguf_dir))
         ok(f"vision encoder: {mmproj}")
 
-    step(6, "preparing the model for PolyStrata")
+    step(6, "preparing the model for Petit Chonk")
     data, _ = data_folder(a.data_dir)
     pack = data / "packs" / tag.lower()            # only the tokenizer: the engine reads the GGUF itself
     if not (pack / "tokenizer" / "vocab.json").exists():
@@ -8826,7 +8826,7 @@ def main() -> int:
                 "cosine 0.999 vs BF16); see 'A Q8_0 encoder' in docs/DETAILS.md")
 
     # ---- 6. the pack and the MTP draft layer
-    step(6, "preparing the model for PolyStrata")
+    step(6, "preparing the model for Petit Chonk")
     pack = find_in(roots, f"packs/{tag.lower()}") or data / "packs" / tag.lower()
     env = dict(os.environ, STRATA_GGUF_PY=str(llama / "gguf-py"))
     if ready:                                          # the downloaded pack folder is the pack, experts.bin included
