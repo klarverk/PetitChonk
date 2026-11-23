@@ -36,3 +36,9 @@ gives other bytes; `git show HEAD:<path> | sha256sum` gives the stored ones.
 | `bench/test/test_p4_cand.py` | `scripts/pub/p4/test/test_p4_cand.py` | `e962ac207d214c75…` | `e962ac207d214c75…` | 0 |
 | `speed/p4b.py` | `scripts/pub/p4b/p4b.py` | `cbcf6c6a00510be3…` | `7273f6d6ba16767c…` | 5 |
 | `speed/ballast.py` | `scripts/pub/p4b/ballast.py` | `ef7740b9fde17dcd…` | `ef7740b9fde17dcd…` | 0 |
+| `cache_bias/qd_smoke.py` | `scripts/explore/qd_smoke.py` | `668c14da82201787…` | `7d9c9923681f22ec…` | 3 |
+| `cache_bias/qd_vs_ref.py` | `scripts/explore/qd_vs_ref.py` | `6f0170cc2e35d648…` | `86f7a737168cdbd9…` | 3 |
+| `cache_bias/qd_split.py` | `scripts/explore/qd_split.py` | `9e18041d45e7eb35…` | `a92b7baa23a83084…` | 4 |
+| `cache_bias/qd_big.py` | `scripts/explore/qd_big.py` | `28f8f96defef5f00…` | `bfab58f7641b98e4…` | 3 |
+| `cache_bias/qd_big_vs_q4.py` | `scripts/explore/qd_big_vs_q4.py` | `1bb1f9e3498150bd…` | `172e3f769bcc5a52…` | 2 |
+| `cache_bias/b3_steered.py` | `scripts/explore/b3_steered.py` | `f1f0f57e2dc84d4b…` | `d423c6b1cd74fcf1…` | 2 |

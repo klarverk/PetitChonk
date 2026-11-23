@@ -44,6 +44,24 @@ machine they ran on. [SOURCES.md](SOURCES.md) lists each file's original with bo
     Every run records the machine's state, VRAM and available RAM each second, and the drive's reads.
   - `ballast.py` locks a given amount of RAM until told to release it. It is the less-RAM emulation, and needs no
     administrator rights.
+- **`cache_bias/`: the cache-bias measurements** of 22 November 2026 (docs/MISTRAL4.md,
+  [The cache bias](../../docs/MISTRAL4.md#the-cache-bias)). They need an engine that takes `--cache-bias` for
+  Mistral Small 4, as 1.1.0's does.
+  - `qd_smoke.py` is the four-file test. Per file, it runs:
+    - the speed runs: the 8,192-token prompt, then 257 tokens written, at λ 0, 0.25 and 0.5;
+    - the quality runs: three WikiText-2 windows, each a 64-token prompt and then 512 tokens fed one at a time.
+
+    Each quality run's logits are reduced to per-token values and deleted. Its rule file (`RULE.md`) must be in
+    the output folder before it runs.
+  - `qd_vs_ref.py` pairs those per-token values with llama.cpp's reference for UD-Q4_K_M, the benchmark's
+    `b2_ref_gpu` output.
+  - `qd_split.py` uses llama.cpp's reference on each file (`bench/p4_ref.py`, variant `gpu`). It splits each
+    ratio into the file's own loss and the bias's.
+  - `qd_big.py` is the larger UD-Q3_K_XL test: 16 windows, 1,024 tokens each, at λ 0 and 0.5. It expects
+    llama.cpp's reference on that file in the output folder first. `qd_big_vs_q4.py` sets the result beside
+    llama.cpp's UD-Q4_K_M.
+  - `b3_steered.py` runs the multiple-choice harness (`bench/p4_cand.py`, imported unchanged). It reads every
+    prompt a few tokens at a time, so the bias acts on every token, and adds `--cache-bias`.
 
 ## Data and licences
 
@@ -83,6 +101,15 @@ The prompt formats are those of [lm-evaluation-harness](https://github.com/Eleut
 - **`speed/p4b.py`** reads setup's run config for the model: `PETITCHONK_RUN_CONFIG`, by default
   `cc\strata-mistral4-ud-q4_k_m.json` in the work folder. It refuses an engine other than the 1.0.0 release's
   unless `PETITCHONK_ENGINE_SHA256` names it.
+
+- **`cache_bias/`** reads the same work folder:
+  - `PETITCHONK_BINARY` names the engine (default: the exploration build's `steer\build-steer\strata-poly.exe`);
+  - the model files are under `models\…`, as `qd_smoke.py` lists them;
+  - the benchmark's frozen inputs are `pub\p4\freeze_a\b2_windows.jsonl` and `pub\p4\freeze_b\prompts.json`;
+  - the warm expert profile is `pub\p6\run1\b4port\len_8192\expert-profile.txt`;
+  - llama.cpp's reference outputs are `pub\p5\run1\b2_ref_gpu` and `pub\explore\qd1_ref\<file>`;
+  - the larger test's 16 windows are in `pub\explore\qd2_windows.jsonl`: the benchmark's `w02`, `w06`, … `w62`,
+    one per line, as in `b2_windows.jsonl`.
 
 Each script's own docstring gives its usage and exactly what it checks.
 
