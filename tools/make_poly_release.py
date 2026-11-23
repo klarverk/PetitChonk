@@ -1,7 +1,8 @@
 """The ready-made strata-poly for Windows: strata-poly.exe and the image encoder strata-vision.exe, built for other
 PCs (STRATA_PORTABLE: ggml's CPU code for AVX2, the MSVC runtime linked in) and for every card from RTX 20 to RTX 50
-with CUDA 13.0, the version of the CUDA libraries setup.py installs from pip.  They are zipped with a BUILD.json under
-the name setup.py asks the latest release for (poly_asset()), which carries the source_hash() of their source.
+with CUDA 13.0, the version of the CUDA libraries setup.py installs from pip.  They are zipped with a BUILD.json and the
+licence notices of the code in them (NOTICES) under the name setup.py asks the latest release for (poly_asset()), which
+carries the source_hash() of their source.
 
 Run it on a clean checkout of the commit the release is made from, with setup's Python:
 
@@ -21,6 +22,9 @@ sys.path.insert(0, str(ROOT))
 import setup  # noqa: E402
 
 ARCHS = [75, 80, 86, 89, 120]   # RTX 20, A100 and A-series, RTX 30, RTX 40, RTX 50
+# MIT asks for the copyright and permission notice with every copy, and the zip is also downloaded on its own: the
+# repository's licence (the Strata project's, PolyStrata's and Petit Chonk's lines) and ggml's, kept in third_party/ggml
+NOTICES = {"LICENSE.txt": ROOT / "LICENSE", "LICENSE-ggml.txt": ROOT / "third_party" / "ggml" / "LICENSE"}
 
 
 def main() -> int:
@@ -56,6 +60,8 @@ def main() -> int:
         f.write(poly / setup.POLY_EXE, setup.POLY_EXE)
         f.write(vis / "bin" / setup.VEXE, setup.VEXE)
         f.writestr("BUILD.json", json.dumps(meta, indent=1))
+        for name, path in NOTICES.items():
+            f.write(path, name)
     print(f"{z}\n  {z.stat().st_size:,} bytes, sha256 {hashlib.sha256(z.read_bytes()).hexdigest()}")
     return 0
 
