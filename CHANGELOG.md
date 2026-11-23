@@ -15,6 +15,11 @@ that the version numbers describe is:
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-23
+
+Upstream base unchanged: PolyStrata `v0.1.45-poly.10`,
+[`3e1642161198c50ff1abed4046f4e4f476099dbb`](https://github.com/simplexai-labs/PolyStrata/commit/3e1642161198c50ff1abed4046f4e4f476099dbb).
+
 ### Added
 
 - The cache bias for Mistral Small 4 (`--cache-bias`), off by default. While the model writes, each expert already
@@ -80,5 +85,6 @@ The first release. Upstream base: PolyStrata
 - `LICENSE` adds Petit Chonk's copyright line beside the Strata project's and PolyStrata's.
 - `SECURITY.md` sends vulnerability reports to this repository.
 
-[Unreleased]: https://github.com/klarverk/PetitChonk/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/klarverk/PetitChonk/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/klarverk/PetitChonk/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/klarverk/PetitChonk/compare/3e1642161198c50ff1abed4046f4e4f476099dbb...v1.0.0
