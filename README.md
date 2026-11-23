@@ -62,6 +62,11 @@ place with `--gguf-dir <its folder>`.
 The run config setup writes is the one that was verified:
 - **16K tokens of context** (recommended). 32K, 64K and 128K are offered, marked "not verified for this model".
 - **One token a step** (`--lookup 0 --window 1`): the engine's guessing ahead is off for this model.
+- **The cache bias is off** (`--cache-bias`, new in 1.1.0). Setup also offers 0.25 and 0.5, which make the model
+  prefer the experts already on the card while it writes. In a short speed test on the release engine they wrote
+  1.36× and 2.0× as fast. In a short quality test (on a build of the same source) the text changed a little: no
+  loss seen at 0.25, about 3% in perplexity at 0.5. The verification below was made with it off. Details:
+  [the cache bias](docs/MISTRAL4.md#the-cache-bias).
 
 The server then answers at `http://127.0.0.1:8080/v1` (OpenAI) and `/v1/messages` (Anthropic), with a web app at
 `http://127.0.0.1:8080/`.
@@ -150,11 +155,26 @@ The tools are in [`tools/mistral4/`](tools/mistral4/). Details: [docs/MISTRAL4.m
 
 ## Using the rest of PolyStrata
 
-Apart from Mistral Small 4 and the name in the web app, the window titles and setup's first line, the code here is
-PolyStrata's.
+Apart from Mistral Small 4, the cache bias and the name (in the web app, the window titles and setup's texts), the
+code here is PolyStrata's.
 [PolyStrata's README](https://github.com/simplexai-labs/PolyStrata#readme) and the [docs](docs/) folder describe it.
 The translated READMEs (`README.de.md`, `README.es.md`, `README.fr.md`, `README.ja.md`, `README.pt-BR.md`,
 `README.tr.md`, `README.zh-CN.md`) are PolyStrata's, and describe PolyStrata.
+
+## Built with
+
+- **PolyStrata `v0.1.45-poly.10`**, commit
+  [`3e164216`](https://github.com/simplexai-labs/PolyStrata/commit/3e1642161198c50ff1abed4046f4e4f476099dbb): the
+  upstream base of this release.
+- **ggml** (MIT, the ggml authors), from llama.cpp
+  [`3cf03257`](https://github.com/ggml-org/llama.cpp/commit/3cf03257f219afbe7334045ff7c6a06ac68c627d). Its CPU
+  backend and quantization formats are compiled into `strata-poly`, and setup downloads that llama.cpp source with
+  its `gguf-py`.
+- **CUDA 13.0.** The ready-made engine is built with it for RTX 20 to RTX 50 cards. Setup installs NVIDIA's CUDA
+  13.0 runtime and cuBLAS from pip; the card needs an NVIDIA driver that supports CUDA 13.0 (tested with 596.36).
+- **Python 3.10 or newer.** `START-HERE.bat` installs Python 3.12 for your user account if it finds none.
+- **For the checks only:** llama.cpp `c7518dbe` and Mistral's `mistral-common`; see
+  [`tools/mistral4/`](tools/mistral4/).
 
 ## Credits
 

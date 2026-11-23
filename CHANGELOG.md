@@ -15,9 +15,30 @@ that the version numbers describe is:
 
 ## [Unreleased]
 
+### Added
+
+- The cache bias for Mistral Small 4 (`--cache-bias`), off by default. While the model writes, each expert already
+  on the card counts λ more when a token picks its experts; the picked experts keep the router's own weights. It
+  acts only on calls of fewer than 32 tokens, so long prompts are read as before.
+  - `strata-poly` accepts `--cache-bias` for `mistral4` files whose expert weights are renormalized and unscaled,
+    and refuses it for others.
+  - Setup asks for Mistral Small 4 only: off, 0.25 or 0.5. A value other than off goes into the run config and
+    later setup runs keep it. The setup option `--cache-bias off|0.25|0.5` sets it without asking.
+- `docs/MISTRAL4.md`: what the cache bias changes and what it doesn't, the measurements of 22 November 2026 with
+  their scope, and how they were made. Also the release engine's own speed with the bias (23 November), and its
+  accuracy re-check with the bias off.
+- The scripts behind those measurements, in `tools/mistral4/cache_bias/`, with their sources in
+  `tools/mistral4/SOURCES.md`.
+- The README's "Built with" list: PolyStrata `v0.1.45-poly.10`, ggml from llama.cpp `3cf03257`, CUDA 13.0 and
+  Python 3.10 or newer.
+- The release zip carries ggml's and PolyStrata's licence notices.
+
 ### Changed
 
 - Setup's first line names Petit Chonk and Mistral Small 4, in place of PolyStrata's line about its own models.
+- The start script that setup writes (`run-<model>.bat`) titles its window Petit Chonk, and setup's step 6 says it
+  prepares the model for Petit Chonk. 1.0.0 renamed the other window titles; these two still said PolyStrata. The
+  web app's settings note now says to close Petit Chonk's window.
 
 ## [1.0.0] - 2026-11-21
 

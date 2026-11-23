@@ -7,7 +7,8 @@ card and the rest in RAM. Experts that do not fit in RAM either are read back fr
 them.
 
 This page gives the details behind the [README](../README.md): what runs, what setup writes, how the port was
-checked, and the accuracy and speed figures with their scope.
+checked, and the accuracy and speed figures with their scope. It also covers [the cache bias](#the-cache-bias), an
+option for faster writing: what it changes, and what was measured.
 
 ## What runs
 
@@ -31,6 +32,7 @@ checked, and the accuracy and speed figures with their scope.
 - An expert profile in the model's pack. The engine counts which experts are used, and keeps the most-used ones on
   the card at the next start.
 - Prompts read 1,024 tokens at a time.
+- No `--cache-bias` unless you choose one. Setup asks; off is the default (see [The cache bias](#the-cache-bias)).
 
 **Its estimates for this model** (setup's `--check` and its warnings):
 - about 5.8 GiB of VRAM before any expert at a 32K context (measured on the RTX 5080);
@@ -73,9 +75,10 @@ any output of the port existed.
   statistic reached 0.468 of its threshold.
 - **On the release source,** after the merge with current PolyStrata, a re-check of 3 run sets under the same
   frozen rules passed: worst 0.388.
-- **The ready-made engine** (the release asset, built for RTX 20–50) passed the same re-check: worst 0.429. On the
-  CPU its outputs were byte-identical to the native build's in a spot check; on the GPU they differ slightly, as
-  the re-check allows.
+- **1.0.0's ready-made engine** (the release asset, built for RTX 20–50) passed the same re-check: worst 0.429. On
+  the CPU its outputs were byte-identical to the native build's in a spot check; on the GPU they differ slightly,
+  as the re-check allows.
+- **1.1.0's ready-made engine** passed the same re-check with the cache bias off: worst 0.383.
 - **What this shows:** the port computes what llama.cpp computes, within llama.cpp's own spread, for this model
   file on these inputs, up to 16K tokens. It is closed-loop self-evaluation, not independent verification. Other
   quantizations, cards, operating systems, sampling and longer contexts are not covered.
@@ -154,6 +157,173 @@ One PC: RTX 5080 16 GB, i9-10850K, 128 GB of DDR4-3200 (XMP on), Windows 11, the
 
 **Not measured:** other cards, CPUs, RAM speeds and PCs; contexts above 64K; PCs with less than 64 GB; several
 requests at once; a profile that has learned from use.
+
+## The cache bias
+
+New in 1.1.0, and **off by default**. It makes writing faster by letting the model prefer the experts that are
+already on the graphics card. The cost is that the text is no longer exactly the model's own.
+
+### What it changes
+
+For every token, each of the 36 layers scores its 128 experts and uses the 4 with the highest scores, plus the
+shared expert, which is always used. With a cache bias of λ:
+- every expert already on the card gets λ added to its score before the 4 are picked;
+- the 4 picked then work with the weights the model gives them from their own scores, as without the bias.
+
+So the bias changes which experts are picked, not how much each one counts. More of the picks are then experts on
+the card, fewer are read from RAM, and since writing speed is limited by reading experts from RAM, the model writes
+faster. The text differs a little from what it writes without the bias.
+
+### What it steers, and what not
+
+The bias acts only when the engine computes fewer than 32 tokens at once:
+- **Steered:** the tokens the model writes, one at a time. Also any prompt, or piece of a prompt, shorter than 32
+  tokens, for example a short message read on top of a conversation the server has kept in its cache.
+- **Not steered:** prompt pieces of 32 tokens or more, read with the model's own pick. So is the first token written
+  right after such a piece.
+
+In practice, the bias changes how the model writes, not how it reads a long prompt.
+
+### Turning it on, checking it, turning it off
+
+- **Setup asks** for Mistral Small 4 only: "Cache bias?", with `off` (recommended), `0.25` or `0.5`, the two values
+  that were measured. Enter keeps the model's earlier choice; on a first install, that is off. To set it without
+  the question: `SETUP.bat --family mistral4 --cache-bias 0.25` (or `0.5`, or `off`).
+- **Where it is kept:** a value other than off goes into the model's run config (`strata-mistral4-ud-q4_k_m.json`)
+  as `--cache-bias <λ>`. Later setup runs keep it until you choose `off`, which removes it.
+- **How to see that it is on:** when the engine starts with it, it prints a line beginning
+  `strata-poly: cache bias 0.25:`. With the bias off there is no such line.
+- **When the engine refuses it:** it accepts the bias for Mistral Small 4 only when the file's expert weights are
+  renormalized and unscaled, which is true of every file measured below. Otherwise it stops with
+  "mistral4: --cache-bias needs expert_weights_norm and an expert_weights_scale of 1". Setup offers the bias for
+  no other model.
+
+**Why it is off by default:** every accuracy check on this page ([How it was verified](#how-it-was-verified),
+[Accuracy benchmarks](#accuracy-benchmarks)) was made with the model's own pick. The bias has only the smaller
+measurements below.
+
+### Speed of the release engine (23 November 2026)
+
+This is the engine in the 1.1.0 download, on the PC in [Speed](#speed), with `UD-Q4_K_M`. The test is the speed
+test of the measurements below: an 8,192-token prompt, then 257 tokens written. The exploration build's runs from
+22 November are listed beside it.
+
+| Cache bias | Release engine, writing tokens/s | Mean | Speed against off | Exploration build, 22 November | Experts served from the card |
+|---|---|---|---|---|---|
+| off | 15.67 and 18.22 | 16.95 | 1.00 | 17.71 and 15.68 | 37% |
+| 0.25 | 22.95 and 23.20 | 23.08 | **1.36** | 19.84 (1.19) | 55% |
+| 0.5 | 34.40 and 33.49 | 33.95 | **2.00** | 28.93 (1.73) | 77% |
+
+- **How the runs were set up:**
+  - two runs per value, each a fresh engine start, in the order off, 0.25, 0.5, 0.5, 0.25, off, so that any drift
+    over the runs falls evenly on each value;
+  - each started from a fresh copy of the same warm expert profile, with a 16K context and
+    `--lookup 0 --window 1`.
+- **The rule, fixed before the runs:** if 0.25 or 0.5 had not been faster than off on the release engine, setup
+  would no longer call them faster. Both are faster.
+- **How precise it is:** the two runs with the bias off differ by 15%, so the figures are not precise to that.
+- **Against the exploration build:**
+  - both builds served the same share of experts from the card;
+  - the release engine wrote faster at 0.25 and 0.5 than the exploration build's single runs did, and the cause is
+    not established.
+- **Speed only:** quality was not measured again on the release engine. The quality results below come from the
+  exploration build, which has the same engine source.
+
+### What was measured (22 November 2026)
+
+These measurements ran on the PC in [Speed](#speed), with an exploration build of 1.1.0's engine source: 1.0.0's
+source plus the cache-bias change, built natively, not the release engine (its speed is in the section above). One
+run used 1.0.0's native build instead, as noted where it appears. Each test's rule was fixed before it ran.
+
+Which experts are on the card depends on what the engine has read, so steered runs do not repeat byte for byte. The
+tests compare by statistics. The speed figures are single runs.
+
+**UD-Q4_K_M, the file setup installs:**
+
+| Cache bias | Writing, tokens/s | Speed against off | Experts served from the card | Perplexity against llama.cpp (95% interval) |
+|---|---|---|---|---|
+| off | 17.71 and 15.68 | 1.00 | 37% | 0.996 (0.983–1.010) and 0.991 (0.976–1.004) |
+| 0.25 | 19.84 | 1.19 | 55% | 0.999 (0.979–1.020) |
+| 0.5 | 28.93 | 1.73 | 77% | 1.032 (1.005–1.063) |
+
+- **Speed:** an 8,192-token prompt, then 257 tokens written.
+  - One run per value, and two with the bias off. Those two differ by 12%, so a gain of that size is within one
+    run's spread.
+  - The ratios are against the mean of the two runs with the bias off (16.70 tokens/s).
+- **Quality:** perplexity on 1,533 tokens of WikiText-2, from three of the benchmark's windows. Each window was a
+  64-token prompt, then 512 tokens fed one at a time, so the bias acted on every scored token.
+  - Each engine's tokens were paired one for one with llama.cpp `c7518dbe`'s on the same file.
+  - The intervals are a bootstrap over 24 blocks of 64 tokens (10,000 resamples).
+  - For scale: llama.cpp's own CPU path against its GPU path, on one of the three windows, gives 0.993
+    (0.976–1.011).
+- **How to read it:**
+  - At 0.25 the ratio's interval contains 1.0: **no loss seen**, at this size.
+  - At 0.5 the interval lies above 1.0: **a loss of about 3% in perplexity**.
+
+  These are the descriptions setup gives. The test's own rule compared each value with the bias off, against a 2%
+  bar, and called both "unclear": 1,533 tokens cannot show whether a loss is above 2%.
+- **Not measured on this file:** task accuracy with the bias; longer texts; prompts other than these.
+
+**UD-Q3_K_XL, measured but not offered** (setup installs UD-Q4_K_M only). This smaller file fits more experts on the
+card, so the bias was measured further on it:
+- **Speed** (the same test, against UD-Q4_K_M with the bias off): 1.47× off, 1.63× at 0.25 and 2.35× at 0.5
+  (39.2 tokens/s).
+- **The bias's own cost, a larger test:** 16 other WikiText-2 windows (`w02`, `w06`, … `w62`). Each was a 64-token
+  prompt, then 1,024 tokens fed one at a time: 16,368 scored tokens.
+  - At 0.5, against llama.cpp on the same file: 1.0071 (0.9946–1.0197).
+  - The test asked whether the bias's loss is under 1%, and at this size it cannot say. The best estimate is +0.7%;
+    the most the interval allows is about +2%.
+  - The speed of those one-at-a-time tokens: 23.1 tokens/s off, 35.8 at 0.5 (1.55×).
+- **The file's own cost:**
+  - In perplexity, llama.cpp on UD-Q3_K_XL against llama.cpp on UD-Q4_K_M gives 1.054 (1.043–1.067), on the same
+    16,368 tokens.
+  - In task accuracy, on the multiple-choice benchmark above (900 items, the same harness and 1.0.0's native build,
+    the bias off), it scored 66.1% against llama.cpp UD-Q4_K_M's 69.0%. That is −2.9 points (−4.9 to −0.9), McNemar p = 0.0073: a loss.
+- **The bias on task accuracy:** the same 900 items, with every prompt read 16 tokens at a time so the bias acts on
+  every token, which is harsher than real use.
+  - At 0.5 it scored 67.2% against 66.8% with the bias off: +0.4 points (−1.6 to +2.5), p = 0.75.
+  - So no change was seen at this size, though about 13% of the answers changed, in both directions.
+
+**Four files at a glance** (the same speed and quality tests as UD-Q4_K_M above). Here quality is against llama.cpp
+on UD-Q4_K_M, so it combines the file's own loss with the bias's:
+
+| File | Speed, off / 0.25 / 0.5 (against UD-Q4_K_M off) | Perplexity, off / 0.25 / 0.5 (against llama.cpp UD-Q4_K_M) |
+|---|---|---|
+| Unsloth UD-Q4_K_M | 1.00 / 1.19 / 1.73 | 0.996 / 0.999 / 1.032 |
+| bartowski Q3_K_M | 1.51 / 2.04 / 2.66 | 1.031 / 1.071 / 1.071 |
+| Unsloth UD-Q3_K_XL | 1.47 / 1.63 / 2.35 | 1.044 / 1.047 / 1.053 |
+| Unsloth UD-Q2_K_XL | 1.68 / 2.30 / 2.82 | 1.243 / 1.242 / 1.268 |
+
+- **The engine is not the source of these losses.** With the bias off, the engine matched llama.cpp on each file
+  within the interval: UD-Q4_K_M 0.996, Q3_K_M 0.997, UD-Q3_K_XL 0.995, UD-Q2_K_XL 1.015 (0.994–1.036). That is on
+  1,533 tokens, which is not a verification of those files.
+- **Each interval spans several percent** at this size (about 3 to 6%, more for UD-Q2_K_XL). A difference of a few
+  percent between two rows is therefore not established.
+- **The Unsloth files** are revision `bd93c721`, and bartowski's Q3_K_M is revision `f569d04e`.
+
+### How the measurements were made
+
+- **The engine:** the exploration build above, with CUDA 13.0, run with `--lookup 0 --window 1` as setup writes it.
+  - The speed and perplexity runs used a 16K context. Each started from a fresh copy of the same warm expert
+    profile: the one learned by the 8,192-token runs behind this page's speed figures.
+  - The multiple-choice runs used the benchmark harness's own settings.
+- **The scripts** are in [`tools/mistral4/cache_bias/`](../tools/mistral4/cache_bias/). Each one's docstring says
+  exactly what it does.
+  - `qd_smoke.py`: the four-file test (speed and quality).
+  - `qd_vs_ref.py` and `qd_split.py`: the pairing with llama.cpp, and the split into the file's loss and the bias's.
+  - `qd_big.py` and `qd_big_vs_q4.py`: the larger UD-Q3_K_XL test.
+  - `b3_steered.py`: the multiple choice with every token steered.
+- **llama.cpp's side** is the benchmark's `bench/p4_ref.py`. The multiple-choice runs use the benchmark harness
+  (`bench/p4_cand.py`, `bench/p4_score.py`) unchanged, with only the model, or the reading size and the bias,
+  changed.
+- **The rules,** fixed before each run:
+  - the four-file test called a variant fast at 1.20× UD-Q4_K_M or more, and labelled quality "no loss seen"
+    (interval's upper end at most 1.02), "loss seen" (lower end above 1.02) or "unclear";
+  - the larger test had its 1% bar;
+  - the multiple choice used McNemar's exact test at 5%.
+- **What these results are:** benchmarked speed from single runs, and a low-confidence indication of quality: one
+  kind of text, perplexity rather than task accuracy except where stated, and small samples. It is closed-loop
+  self-evaluation by the people who wrote the change, not independent verification.
 
 ## Reproducing the checks
 
